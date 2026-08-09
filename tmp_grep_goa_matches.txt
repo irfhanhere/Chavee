@@ -1,0 +1,6 @@
+Matches for Goa/Workshop/Workation/Hackathon/Staycation in AdminDashboard.jsx:
+109: { title: 'Developer Workation Goa 🌊', description: 'Collaborate with campus builders by the beach.', host_name: 'Chavee Team', location: 'Goa', event_date: null, price: 0, seats_total: null, status: 'Coming Soon' },
+110: { title: 'AI & Prompt Engineering Workshop 🤖', description: 'Mastering LLMs, prompt patterns, and AI tools.', host_name: 'Chavee Team', location: 'Online', event_date: null, price: 0, seats_total: null, status: 'Coming Soon' },
+112: { title: 'National 36-Hour Hackathon 🏆', description: 'Compete for cash prizes and developer internships.', host_name: 'Chavee Team', location: 'Kochi', event_date: null, price: 0, seats_total: null, status: 'Coming Soon' },
+113: { title: 'PM Staycation Radisson 🏨', description: 'Exclusive staycation event for aspiring Product Managers.', host_name: 'Chavee Team', location: 'Kochi', event_date: null, price: 0, seats_total: null, status: 'Coming Soon' },
+321: { icon: '🎪', label: 'Live Events', value: stats?.liveEvents, sub: 'Workshops & webinars', color: '#EC4899', to: '/admin/events' },

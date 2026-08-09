@@ -1,0 +1,72 @@
+# Chavee — Apache .htaccess for Hostinger SPA (React Router)
+# Place this in your public_html/ folder on Hostinger
+
+# Enable rewrite engine
+Options -MultiViews
+RewriteEngine On
+
+# If on Hostinger subdirectory, uncomment and set:
+# RewriteBase /
+
+# Don't rewrite files or directories that exist
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Rewrite everything else to index.html (SPA fallback)
+RewriteRule ^ index.html [QSA,L]
+
+# ── Security Headers ──────────────────────────────────────────
+<IfModule mod_headers.c>
+    # Prevent clickjacking
+    Header always set X-Frame-Options "SAMEORIGIN"
+    
+    # Prevent MIME sniffing
+    Header always set X-Content-Type-Options "nosniff"
+    
+    # XSS Protection (legacy browsers)
+    Header always set X-XSS-Protection "1; mode=block"
+    
+    # Referrer Policy
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    
+    # Force HTTPS (after SSL is active on chavee.in)
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+</IfModule>
+
+# ── Force HTTPS redirect ──────────────────────────────────────
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# ── Cache static assets ───────────────────────────────────────
+<IfModule mod_expires.c>
+    ExpiresActive On
+    
+    # HTML — no cache (SPA always loads index.html fresh)
+    ExpiresByType text/html "access plus 0 seconds"
+    
+    # CSS & JS — cache 1 year (Vite adds content hash to filenames)
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    
+    # Images — cache 6 months
+    ExpiresByType image/png "access plus 6 months"
+    ExpiresByType image/jpeg "access plus 6 months"
+    ExpiresByType image/svg+xml "access plus 6 months"
+    ExpiresByType image/webp "access plus 6 months"
+    ExpiresByType image/x-icon "access plus 1 year"
+    
+    # Fonts — cache 1 year
+    ExpiresByType font/woff2 "access plus 1 year"
+    ExpiresByType font/woff "access plus 1 year"
+</IfModule>
+
+# ── Gzip compression ─────────────────────────────────────────
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json
+    AddOutputFilterByType DEFLATE image/svg+xml font/woff2
+</IfModule>
+
+# ── Remove www redirect (optional — redirect www → non-www) ──
+# Uncomment if you want www.chavee.in → chavee.in redirect:
+# RewriteCond %{HTTP_HOST} ^www\.chavee\.in [NC]
+# RewriteRule ^(.*)$ https://chavee.in/$1 [L,R=301]

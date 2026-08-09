@@ -1,0 +1,59 @@
+{
+  "id": {
+    "exists": true
+  },
+  "title": {
+    "exists": true
+  },
+  "description": {
+    "exists": true
+  },
+  "host_name": {
+    "exists": true
+  },
+  "location": {
+    "exists": true
+  },
+  "event_date": {
+    "exists": true
+  },
+  "price": {
+    "exists": true
+  },
+  "seats_total": {
+    "exists": true
+  },
+  "seats_filled": {
+    "exists": true
+  },
+  "image_url": {
+    "exists": true
+  },
+  "status": {
+    "exists": true
+  },
+  "created_at": {
+    "exists": true
+  },
+  "featured_on_landing": {
+    "exists": true
+  },
+  "fee": {
+    "exists": false,
+    "error": "column events.fee does not exist"
+  },
+  "ticket_price": {
+    "exists": false,
+    "error": "column events.ticket_price does not exist"
+  },
+  "cost": {
+    "exists": false,
+    "error": "column events.cost does not exist"
+  },
+  "entry_fee": {
+    "exists": false,
+    "error": "column events.entry_fee does not exist"
+  },
+  "sample_data": [],
+  "sample_error": null
+}

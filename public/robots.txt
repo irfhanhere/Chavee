@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api
+Disallow: /auth
+Sitemap: https://chavee.in/sitemap.xml
+Host: https://chavee.in

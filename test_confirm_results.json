@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "log": [
+    "Temporary Email: qa_confirm_1785170569316@web-library.net",
+    "Signing up in Supabase...",
+    "Signed up! User ID: 9bdc684a-171c-4794-b90f-df280518752d",
+    "Waiting for confirmation email (polling mail.tm)...",
+    "Checking inbox... (attempt 1)",
+    "Found 1 email(s). Fetching body...",
+    "Verification URL found: https://dtokistffdnycrzbmxcr.supabase.co/auth/v1/verify?token=588aff089118cf60511b7cbee61db65b3186c3ec79981ae4e6ae7750&type=signup&redirect_to=https://chavee.in",
+    "Triggering verification URL...",
+    "Verification status: 303",
+    "Attempting sign in to verify confirmation...",
+    "✅ Sign in SUCCESS! Authenticated user ID: 9bdc684a-171c-4794-b90f-df280518752d"
+  ]
+}

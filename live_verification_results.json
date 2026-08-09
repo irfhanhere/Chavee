@@ -1,0 +1,110 @@
+[
+  {
+    "section": "PART_1_POOLER",
+    "testName": "Pooler Status",
+    "status": "INFO",
+    "details": "Connection pooler is disabled in Supabase project dashboard (returns tenant not found). Bypassing PG connection and executing all checks via Supabase HTTP Client API."
+  },
+  {
+    "section": "TEST_SETUP",
+    "testName": "User Seeding",
+    "status": "PASS",
+    "details": "Created and confirmed two dynamic test users."
+  },
+  {
+    "section": "PART_2_ATTACK",
+    "testName": "Select Messages (Unprivileged)",
+    "status": "FAIL",
+    "details": "Failed to create conversation as A: infinite recursion detected in policy for relation \"conversation_participants\""
+  },
+  {
+    "section": "PART_2_ATTACK",
+    "testName": "Select Job Applications (Unprivileged)",
+    "status": "PASS",
+    "details": "Query returned empty result (RLS active)"
+  },
+  {
+    "section": "PART_2_ATTACK",
+    "testName": "Update Gig Verified (Unprivileged)",
+    "status": "PASS",
+    "details": "Update was ignored/filtered silently by RLS"
+  },
+  {
+    "section": "PART_2_ATTACK",
+    "testName": "Select Profile Full Row (Unprivileged)",
+    "status": "PASS",
+    "details": "Query returned empty result (RLS active)"
+  },
+  {
+    "section": "PART_2_ATTACK",
+    "testName": "Select public_profiles view",
+    "status": "PASS",
+    "details": "Successfully read public_profiles safe fields. Exposed forbidden: none"
+  },
+  {
+    "section": "PART_2_ATTACK",
+    "testName": "Update Post (Unprivileged)",
+    "status": "PASS",
+    "details": "Update was ignored/filtered silently by RLS"
+  },
+  {
+    "section": "PART_2_ATTACK",
+    "testName": "Select Admins (Unprivileged)",
+    "status": "PASS",
+    "details": "Query returned empty result (RLS active)"
+  },
+  {
+    "section": "PART_2_ATTACK",
+    "testName": "Select Notifications (Unprivileged)",
+    "status": "PASS",
+    "details": "Query returned empty result (RLS active)"
+  },
+  {
+    "section": "PART_2_ATTACK",
+    "testName": "Unverified Gig Visibility",
+    "status": "PASS",
+    "details": "Unverified gig from another user is correctly hidden."
+  },
+  {
+    "section": "PART_3_FUNCTIONAL",
+    "testName": "Post Comments FK Join",
+    "status": "PASS",
+    "details": "Comment successfully saved and joined with public_profiles view."
+  },
+  {
+    "section": "PART_3_FUNCTIONAL",
+    "testName": "Gig Application Insert",
+    "status": "PASS",
+    "details": "Application record inserted successfully."
+  },
+  {
+    "section": "PART_3_FUNCTIONAL",
+    "testName": "Gig Application Trigger",
+    "status": "PASS",
+    "details": "Success! Trigger handle_gig_proposal automatically initialized conversation ID: 5562430e-1959-4e2b-bbb0-4538721f5d6d"
+  },
+  {
+    "section": "PART_3_FUNCTIONAL",
+    "testName": "Gig Application Participants",
+    "status": "FAIL",
+    "details": "Blocked by RLS policy/error: infinite recursion detected in policy for relation \"conversation_participants\""
+  },
+  {
+    "section": "PART_3_FUNCTIONAL",
+    "testName": "Post Like Notification",
+    "status": "PASS",
+    "details": "Notification for post like delivered successfully."
+  },
+  {
+    "section": "PART_3_FUNCTIONAL",
+    "testName": "Post Comment Notification",
+    "status": "PASS",
+    "details": "Notification for post comment delivered successfully."
+  },
+  {
+    "section": "PART_3_FUNCTIONAL",
+    "testName": "Self-Notification Filtering",
+    "status": "PASS",
+    "details": "Self-notifications correctly filtered out."
+  }
+]

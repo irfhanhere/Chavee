@@ -1,0 +1,18 @@
+- [x] Fix CV Upload prefix to `{user_id}/{filename}` in `Earn.jsx`
+- [x] Add content reporting trigger (🚩 button) on:
+  - [x] Feed posts in `Dashboard.jsx` (PostCard component)
+  - [x] Gig listings in `Earn.jsx`
+  - [x] Direct messages in `Messages.jsx`
+  - [x] Community messages in `Network.jsx`
+- [x] Implement the global Report Content modal in:
+  - [x] `Dashboard.jsx`
+  - [x] `Earn.jsx`
+  - [x] `Messages.jsx`
+  - [x] `Network.jsx`
+- [x] Build the Admin "Reports" Panel section:
+  - [x] Create `ReportsManager.jsx` with full list, enrichments, previews, and actions
+  - [x] Register `/admin/reports` route in `App.jsx`
+  - [x] Add Reports tab link with 🚩 icon to `AdminShell.jsx`
+- [x] Verify changes by simulating rate limit responses and checking UI flows
+- [x] Create walkthrough documenting changes, audit findings, and verification results
+- [x] Run production build to verify compilation success

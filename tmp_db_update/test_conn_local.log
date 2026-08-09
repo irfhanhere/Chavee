@@ -1,0 +1,28 @@
+Error: error: password authentication failed for user "postgres"
+    at parseErrorMessage (C:\Users\Lenovo\Desktop\ALL FILES\business\Chavee\application\chavee\tmp_db_update\node_modules\pg-protocol\dist\parser.js:305:11)
+    at Parser.handlePacket (C:\Users\Lenovo\Desktop\ALL FILES\business\Chavee\application\chavee\tmp_db_update\node_modules\pg-protocol\dist\parser.js:143:27)
+    at Parser.parse (C:\Users\Lenovo\Desktop\ALL FILES\business\Chavee\application\chavee\tmp_db_update\node_modules\pg-protocol\dist\parser.js:37:38)
+    at Socket.<anonymous> (C:\Users\Lenovo\Desktop\ALL FILES\business\Chavee\application\chavee\tmp_db_update\node_modules\pg-protocol\dist\index.js:12:42)
+    at Socket.emit (node:events:509:28)
+    at addChunk (node:internal/streams/readable:563:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+    at Readable.push (node:internal/streams/readable:394:5)
+    at TCP.onStreamRead (node:internal/stream_base_commons:189:23) {
+  length: 104,
+  severity: 'FATAL',
+  code: '28P01',
+  detail: undefined,
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'auth.c',
+  line: '329',
+  routine: 'auth_failed'
+}

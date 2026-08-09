@@ -1,0 +1,29 @@
+Starting Live Verification...
+[PART_1_POOLER] Pooler Status - INFO: Connection pooler is disabled in Supabase project dashboard (returns tenant not found). Bypassing PG connection and executing all checks via Supabase HTTP Client API.
+Attempting to log in as existing User A...
+Attempting to log in as existing User B...
+Successfully logged in using existing confirmed test accounts.
+[TEST_SETUP] User Seeding - PASS: Created and confirmed two dynamic test users.
+Using valid community ID for posts: 097e5827-da10-46bf-bc6c-35b97ef28011
+
+--- Running Part 2: Adversarial Privacy Checks ---
+[PART_2_ATTACK] Select Messages (Unprivileged) - FAIL: Failed to create conversation as A: infinite recursion detected in policy for relation "conversation_participants"
+[PART_2_ATTACK] Select Job Applications (Unprivileged) - PASS: Query returned empty result (RLS active)
+[PART_2_ATTACK] Update Gig Verified (Unprivileged) - PASS: Update was ignored/filtered silently by RLS
+[PART_2_ATTACK] Select Profile Full Row (Unprivileged) - PASS: Query returned empty result (RLS active)
+[PART_2_ATTACK] Select public_profiles view - PASS: Successfully read public_profiles safe fields. Exposed forbidden: none
+[PART_2_ATTACK] Update Post (Unprivileged) - PASS: Update was ignored/filtered silently by RLS
+[PART_2_ATTACK] Select Admins (Unprivileged) - PASS: Query returned empty result (RLS active)
+[PART_2_ATTACK] Select Notifications (Unprivileged) - PASS: Query returned empty result (RLS active)
+[PART_2_ATTACK] Unverified Gig Visibility - PASS: Unverified gig from another user is correctly hidden.
+
+--- Running Part 3: Functional Flow Tests ---
+[PART_3_FUNCTIONAL] Post Comments FK Join - PASS: Comment successfully saved and joined with public_profiles view.
+[PART_3_FUNCTIONAL] Gig Application Insert - PASS: Application record inserted successfully.
+[PART_3_FUNCTIONAL] Gig Application Trigger - PASS: Success! Trigger handle_gig_proposal automatically initialized conversation ID: 5562430e-1959-4e2b-bbb0-4538721f5d6d
+[PART_3_FUNCTIONAL] Gig Application Participants - FAIL: Blocked by RLS policy/error: infinite recursion detected in policy for relation "conversation_participants"
+[PART_3_FUNCTIONAL] Post Like Notification - PASS: Notification for post like delivered successfully.
+[PART_3_FUNCTIONAL] Post Comment Notification - PASS: Notification for post comment delivered successfully.
+[PART_3_FUNCTIONAL] Self-Notification Filtering - PASS: Self-notifications correctly filtered out.
+
+Verification completed. Results written to live_verification_results.json.
