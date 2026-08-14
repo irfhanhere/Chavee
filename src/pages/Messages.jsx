@@ -67,7 +67,11 @@ export default function Messages() {
     const [vendorModal, setVendorModal] = useState(null); // null | { sellerId, offerId }
 
     // Payment state
-    const [paymentModal, setPaymentModal] = useState(null); // null | { offerId, orderId, paymentSessionId, amounts }
+    // phase: 'checkout' (Dropin overlay open) → 'confirming' (Dropin says the
+    // card/UPI step succeeded, but we're now waiting for cashfree-webhook to
+    // actually write gig_contracts.payment_status — the only thing we trust)
+    // → 'timeout' (still unconfirmed after a while; offer a manual re-check).
+    const [paymentModal, setPaymentModal] = useState(null); // null | { offerId, orderId, contractId, paymentSessionId, amounts, phase }
     const [processingPayment, setProcessingPayment] = useState(false);
 
     // Deliver work state
@@ -518,8 +522,10 @@ export default function Messages() {
             setPaymentModal({
                 offerId,
                 orderId: json.order_id,
+                contractId: json.contract_id,
                 paymentSessionId: json.payment_session_id,
                 amounts: json.amounts,
+                phase: 'checkout',
             });
         } catch (err) {
             console.error('Error initiating payment:', err);
@@ -529,8 +535,10 @@ export default function Messages() {
         }
     };
 
-    const handlePaymentSuccess = async (offerId) => {
-        // Payment completed - reload context to reflect paid status
+    // Only ever called once cashfree-webhook has actually written
+    // gig_contracts.payment_status = 'paid' — never from the Dropin
+    // checkout Promise resolving. See the 'confirming'-phase effect below.
+    const handlePaymentConfirmed = async () => {
         showToast('Payment successful! 🎉', 'success');
         setPaymentModal(null);
         loadGigContext();
@@ -596,9 +604,11 @@ export default function Messages() {
         }
     };
 
-    // Drive the Cashfree Dropin checkout whenever a new payment order is opened
+    // Drive the Cashfree Dropin checkout whenever a new payment order is opened.
+    // Only runs during the 'checkout' phase — once we move to 'confirming' this
+    // effect has nothing left to do (Dropin's job is done; the webhook takes over).
     useEffect(() => {
-        if (!paymentModal) return;
+        if (!paymentModal || paymentModal.phase !== 'checkout') return;
         if (!window.Cashfree) {
             showToast('Payment SDK failed to load. Please refresh and try again.', 'error');
             setPaymentModal(null);
@@ -610,14 +620,66 @@ export default function Messages() {
             redirectTarget: '_modal',
         }).then((result) => {
             if (result.error) {
+                // A real failure signal from the gateway itself (e.g. card declined) —
+                // fine to trust directly, this isn't the "browser claims success" case.
                 showToast(result.error.message || 'Payment failed', 'error');
                 setPaymentModal(null);
             } else if (result.paymentDetails) {
-                handlePaymentSuccess(paymentModal.offerId);
+                // Dropin says the checkout step finished, but this is NOT payment
+                // confirmation — only cashfree-webhook writing payment_status='paid'
+                // is authoritative. Switch to a pending state and wait for that.
+                setPaymentModal(m => m && { ...m, phase: 'confirming' });
             }
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [paymentModal?.orderId]);
+    }, [paymentModal?.orderId, paymentModal?.phase]);
+
+    // While 'confirming': do one immediate check (in case the webhook already
+    // landed before we got here), then listen for the real-time UPDATE that
+    // cashfree-webhook's DB write produces, with a timeout fallback in case the
+    // realtime event is ever missed rather than leaving the user staring at a
+    // spinner forever.
+    useEffect(() => {
+        if (!paymentModal || paymentModal.phase !== 'confirming' || !paymentModal.contractId) return;
+        let cancelled = false;
+        const contractId = paymentModal.contractId;
+
+        const checkNow = async () => {
+            const { data } = await supabase
+                .from('gig_contracts')
+                .select('payment_status')
+                .eq('id', contractId)
+                .single();
+            if (!cancelled && data?.payment_status === 'paid') {
+                handlePaymentConfirmed();
+                return true;
+            }
+            return false;
+        };
+
+        checkNow();
+
+        const channel = supabase.channel(`payment-confirm:${contractId}`)
+            .on('postgres_changes', {
+                event: 'UPDATE', schema: 'public', table: 'gig_contracts', filter: `id=eq.${contractId}`,
+            }, (payload) => {
+                if (!cancelled && payload.new?.payment_status === 'paid') {
+                    handlePaymentConfirmed();
+                }
+            })
+            .subscribe();
+
+        const timeoutId = setTimeout(() => {
+            if (!cancelled) setPaymentModal(m => m && { ...m, phase: 'timeout' });
+        }, 45000);
+
+        return () => {
+            cancelled = true;
+            supabase.removeChannel(channel);
+            clearTimeout(timeoutId);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [paymentModal?.phase, paymentModal?.contractId]);
 
     // Maximum number of counter-offers allowed in a negotiation chain
     const NEGOTIATE_CAP = 5;
@@ -1138,7 +1200,9 @@ export default function Messages() {
                                 </div>
                             )}
 
-                            {/* Cashfree Payment Modal */}
+                            {/* Cashfree Payment Modal — 'checkout' while Dropin is open, 'confirming'
+                                once Dropin's own promise resolves (NOT payment confirmation — see the
+                                effects above), 'timeout' if the webhook hasn't landed after 45s. */}
                             {paymentModal && (
                                 <div style={{
                                     position: 'fixed', inset: 0, zIndex: 9999,
@@ -1159,16 +1223,61 @@ export default function Messages() {
                                         gap: '1rem',
                                         textAlign: 'center'
                                     }}>
-                                        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>Opening secure payment...</h3>
-                                        <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                                            Amount: ₹{paymentModal.amounts?.buyer_amount}
-                                        </p>
-                                        <button
-                                            onClick={() => setPaymentModal(null)}
-                                            style={{ padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, cursor: 'pointer' }}
-                                        >
-                                            Cancel
-                                        </button>
+                                        {paymentModal.phase === 'checkout' && (
+                                            <>
+                                                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>Opening secure payment...</h3>
+                                                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                                                    Amount: ₹{paymentModal.amounts?.buyer_amount}
+                                                </p>
+                                                <button
+                                                    onClick={() => setPaymentModal(null)}
+                                                    style={{ padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, cursor: 'pointer' }}
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </>
+                                        )}
+
+                                        {paymentModal.phase === 'confirming' && (
+                                            <>
+                                                <span style={{ width: 32, height: 32, margin: '0 auto', border: '3px solid var(--border-color)', borderTopColor: 'var(--peacock-green)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />
+                                                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>Confirming payment...</h3>
+                                                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                                                    We're verifying your payment of ₹{paymentModal.amounts?.buyer_amount} with Cashfree. This usually takes a few seconds.
+                                                </p>
+                                                {/* No "Cancel" here on purpose — the card/UPI step already completed on
+                                                    Cashfree's side by this point, so "cancel" would be misleading. Closing
+                                                    just stops watching; the contract updates in the background regardless. */}
+                                                <button
+                                                    onClick={() => setPaymentModal(null)}
+                                                    style={{ padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, cursor: 'pointer' }}
+                                                >
+                                                    Continue in background
+                                                </button>
+                                            </>
+                                        )}
+
+                                        {paymentModal.phase === 'timeout' && (
+                                            <>
+                                                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>Still confirming...</h3>
+                                                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                                                    This is taking longer than usual. If you completed the payment, it will still go through — this will update automatically, or you can check again now.
+                                                </p>
+                                                <button
+                                                    onClick={() => setPaymentModal(m => m && { ...m, phase: 'confirming' })}
+                                                    className="btn-primary"
+                                                    style={{ padding: '0.6rem 1rem', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}
+                                                >
+                                                    Check again
+                                                </button>
+                                                <button
+                                                    onClick={() => setPaymentModal(null)}
+                                                    style={{ padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, cursor: 'pointer' }}
+                                                >
+                                                    Continue in background
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             )}
