@@ -6,6 +6,7 @@ import { ButtonSpinner } from '../components/Spinner.jsx';
 import { getCvSignedUrl } from '../utils/cvStorage.js';
 import { logUserActivity } from '../utils/activityLogger.js';
 import SaveButton from '../components/SaveButton.jsx';
+import { sanitizeFilenameForStorageKey, getAttachmentSignedUrl } from '../utils/attachmentStorage.js';
 
 // Jobs and gigs are both fetched from Supabase (see loadJobs / loadGigs below).
 
@@ -14,6 +15,23 @@ const GIG_CATEGORIES = ['All', 'Graphic Design', 'Development', 'Writing', 'Mark
 const JOB_SUB_TABS = ['All Jobs', 'Internships', 'Part-Time', 'Full-Time', 'Remote', 'Campus Placement', 'Government'];
 
 const GIG_DESCRIPTION_MIN_LENGTH = 30;
+const PROPOSAL_MESSAGE_MIN_LENGTH = 30;
+const PROPOSAL_MESSAGE_MAX_LENGTH = 2000;
+const PROPOSAL_ATTACHMENTS_BUCKET = 'proposal-attachments';
+
+// "Rough Timeline" dropdown — estimated_days is a plain integer column, so
+// each option maps to one concrete day count rather than a fuzzy range.
+const PROPOSAL_TIMELINE_OPTIONS = [
+    { value: 1, label: '1 day' },
+    { value: 2, label: '2 days' },
+    { value: 3, label: '3 days' },
+    { value: 5, label: '5 days' },
+    { value: 7, label: '1 week (7 days)' },
+    { value: 10, label: '10 days' },
+    { value: 14, label: '2 weeks (14 days)' },
+    { value: 21, label: '3 weeks (21 days)' },
+    { value: 30, label: '1 month (30 days)' },
+];
 
 // Buyer-facing copy for gigs.rejection_reason — exact wording supplied by
 // product, do not reword. Keyed by the enum values written by the admin
@@ -173,6 +191,14 @@ export default function Earn() {
     const [proposalMsg, setProposalMsg]   = useState('');
     const [submittingProposal, setSubmittingProposal] = useState(false);
     const [proposalSuccess, setProposalSuccess] = useState(false);
+
+    // A3 — Send Proposal form fields (Group 2, Step 1)
+    const [proposalPrice, setProposalPrice] = useState('');
+    const [proposalTimelineDays, setProposalTimelineDays] = useState('');
+    const [proposalLinks, setProposalLinks] = useState([]);
+    const [proposalLinkInput, setProposalLinkInput] = useState('');
+    const [proposalFiles, setProposalFiles] = useState([]); // staged File objects, uploaded on submit
+    const [proposalPortfolioTab, setProposalPortfolioTab] = useState('links'); // 'links' | 'files'
 
     // In-app job application states
     const [applyingJob, setApplyingJob] = useState(null);
@@ -596,6 +622,12 @@ export default function Earn() {
         setSelectedGig(gig);
         setProposalMsg('');
         setProposalSuccess(false);
+        setProposalPrice('');
+        setProposalTimelineDays('');
+        setProposalLinks([]);
+        setProposalLinkInput('');
+        setProposalFiles([]);
+        setProposalPortfolioTab('links');
     };
 
     const handleDeleteGig = async (gig) => {
@@ -714,8 +746,14 @@ export default function Earn() {
     const handleApplyGig = async (e) => {
         e.preventDefault();
         if (!user || !selectedGig) { navigate('/login'); return; }
-        if (!proposalMsg.trim()) {
-            showToast('Please add a short pitch before submitting.', 'error');
+
+        const trimmedPitch = proposalMsg.trim();
+        if (trimmedPitch.length < PROPOSAL_MESSAGE_MIN_LENGTH) {
+            showToast(`Proposal message must be at least ${PROPOSAL_MESSAGE_MIN_LENGTH} characters.`, 'error');
+            return;
+        }
+        if (!proposalTimelineDays) {
+            showToast('Please select a rough timeline.', 'error');
             return;
         }
 
@@ -731,7 +769,11 @@ export default function Earn() {
             const insertPayload = {
                 gig_id: gigSnapshot.id,
                 applicant_id: currentUser.id,
-                pitch: proposalMsg.trim(),
+                pitch: trimmedPitch,
+                proposed_price: proposalPrice ? Number(proposalPrice) : null,
+                estimated_days: Number(proposalTimelineDays),
+                portfolio_links: proposalLinks,
+                portfolio_files: [], // filled in below, after upload — needs the real application id first
             };
 
             const { data: inserted, error } = await supabase
@@ -748,6 +790,37 @@ export default function Earn() {
                     throw error;
                 }
             } else {
+                // Storage RLS requires the path to start with the real
+                // gig_application_id, so uploads can only happen after the
+                // insert above returns one — mirrors the gig-deliveries
+                // pattern from Phase 1b. sanitizeFilenameForStorageKey is
+                // reused as-is (not re-derived) — same ellipsis/path-
+                // traversal bug from Fix 4 could recur otherwise.
+                if (proposalFiles.length > 0) {
+                    const uploadedFiles = [];
+                    for (const file of proposalFiles) {
+                        try {
+                            const safeName = sanitizeFilenameForStorageKey(file.name);
+                            const path = `${inserted.id}/${Date.now()}_${safeName}`;
+                            const { error: upErr } = await supabase.storage
+                                .from(PROPOSAL_ATTACHMENTS_BUCKET)
+                                .upload(path, file, { cacheControl: '3600', upsert: false });
+                            if (upErr) throw upErr;
+                            uploadedFiles.push({ path, name: file.name, type: file.type, size: file.size });
+                        } catch (fileErr) {
+                            console.error('Portfolio file upload failed:', fileErr);
+                            showToast(`Failed to upload ${file.name}: ${fileErr.message}`, 'error');
+                        }
+                    }
+                    if (uploadedFiles.length > 0) {
+                        const { error: filesUpdateErr } = await supabase
+                            .from('gig_applications')
+                            .update({ portfolio_files: uploadedFiles })
+                            .eq('id', inserted.id);
+                        if (filesUpdateErr) console.error('Failed to save portfolio file references:', filesUpdateErr);
+                    }
+                }
+
                 showToast('🎉 Proposal sent! Redirecting to your messages...', 'success');
                 if (gigSnapshot.posted_by) {
                     try {
@@ -768,6 +841,13 @@ export default function Earn() {
                 }
 
                 setSelectedGig(null);
+                setProposalPrice('');
+                setProposalTimelineDays('');
+                setProposalLinks([]);
+                setProposalLinkInput('');
+                setProposalFiles([]);
+                setProposalPortfolioTab('links');
+
                 if (conversationId) {
                     navigate(`/messages?id=${conversationId}`);
                 } else {
@@ -1325,6 +1405,197 @@ export default function Earn() {
         );
     };
 
+    // A3 — Send Proposal. Full-page view (not a modal), matching the
+    // mockup's dedicated "Propose" breadcrumb step — desktop: form +
+    // gig-summary sidebar (design-references/gig-screens/
+    // A3-send-proposal-.png.png), mobile: gig-summary card stacked above
+    // the form (A3-send-proposal-mobile.png.png). Submits through the
+    // same handleApplyGig used by the old modal, just with the richer
+    // field set wired in.
+    const SendProposalView = ({ gig, onBack }) => {
+        const canSubmit = proposalMsg.trim().length >= PROPOSAL_MESSAGE_MIN_LENGTH && !!proposalTimelineDays;
+
+        const handleAddLink = () => {
+            const link = proposalLinkInput.trim();
+            if (!link) return;
+            setProposalLinks(prev => [...prev, link]);
+            setProposalLinkInput('');
+        };
+        const handleRemoveLink = (idx) => setProposalLinks(prev => prev.filter((_, i) => i !== idx));
+        const handleFilesSelected = (e) => {
+            const files = Array.from(e.target.files || []);
+            if (files.length) setProposalFiles(prev => [...prev, ...files]);
+            e.target.value = '';
+        };
+        const handleRemoveFile = (idx) => setProposalFiles(prev => prev.filter((_, i) => i !== idx));
+
+        const budgetLabel = (gig.budget_min || gig.budget_max)
+            ? `₹${Number(gig.budget_min || gig.price || 0).toLocaleString('en-IN')} - ₹${Number(gig.budget_max || gig.price || 0).toLocaleString('en-IN')}`
+            : `₹${Number(gig.price || 0).toLocaleString('en-IN')}`;
+
+        const gigSummary = (
+            <div style={S.card}>
+                <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+                    <div style={{ fontSize: '1.8rem', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', borderRadius: 12, width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>⚡</div>
+                    <div style={{ minWidth: 0 }}>
+                        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, lineHeight: 1.3 }}>{gig.title}</h3>
+                        <span style={{ display: 'inline-block', marginTop: '0.35rem', fontSize: '0.72rem', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', padding: '0.2rem 0.6rem', borderRadius: 20, fontWeight: 600 }}>
+                            {(gig.category || 'General').split(',')[0].trim()}
+                        </span>
+                    </div>
+                </div>
+                <div style={{ borderTop: '1px solid var(--border-color)', marginTop: '0.85rem', paddingTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.82rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Budget</span>
+                        <span style={{ fontWeight: 700 }}>{budgetLabel}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Posted</span>
+                        <span style={{ fontWeight: 700 }}>{gigTimeAgo(gig.created_at)}</span>
+                    </div>
+                </div>
+            </div>
+        );
+
+        return (
+            <div style={{ animation: 'fadeInUp 0.3s ease-out' }}>
+                <button onClick={onBack} className="btn-ghost" style={{ padding: '0.5rem 1rem', borderRadius: 8, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    ← Back
+                </button>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span onClick={onBack} style={{ color: 'var(--peacock-green)', fontWeight: 700, cursor: 'pointer' }}>Earn</span>
+                    <span>›</span>
+                    <span style={{ color: 'var(--peacock-green)', fontWeight: 700 }}>Gig</span>
+                    <span>›</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{gig.title}</span>
+                    <span>›</span>
+                    <span>Propose</span>
+                </div>
+
+                <h1 style={{ margin: '0 0 0.35rem 0', fontSize: '1.5rem', fontWeight: 900 }}>Send Proposal</h1>
+                <p style={{ margin: '0 0 1.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Introduce yourself and tell the client why you're the right person for this work.</p>
+
+                <div className="proposal-summary-mobile">{gigSummary}</div>
+
+                <div className="proposal-grid">
+                    <form onSubmit={handleApplyGig} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                        <div>
+                            <label style={S.label}>Your Proposal Message *</label>
+                            <textarea
+                                rows={6}
+                                value={proposalMsg}
+                                onChange={e => setProposalMsg(e.target.value.slice(0, PROPOSAL_MESSAGE_MAX_LENGTH))}
+                                placeholder="Explain how you will approach this work, what you will deliver and why you're a great fit for this gig..."
+                                style={{ ...S.input, resize: 'vertical' }}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', fontSize: '0.75rem' }}>
+                                <span style={{ color: proposalMsg.trim().length >= PROPOSAL_MESSAGE_MIN_LENGTH ? 'var(--peacock-green)' : 'var(--text-muted)', fontWeight: 600 }}>
+                                    Minimum {PROPOSAL_MESSAGE_MIN_LENGTH} characters{proposalMsg.trim().length >= PROPOSAL_MESSAGE_MIN_LENGTH ? ' ✓' : ''}
+                                </span>
+                                <span style={{ color: 'var(--text-muted)' }}>{proposalMsg.length} / {PROPOSAL_MESSAGE_MAX_LENGTH}</span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label style={S.label}>Your Price (₹) — Optional</label>
+                            <input type="number" min="0" value={proposalPrice} onChange={e => setProposalPrice(e.target.value)} placeholder="e.g., 1200" style={S.input} />
+                            <p style={{ margin: '0.35rem 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Optional — you can discuss this in chat.</p>
+                        </div>
+
+                        <div>
+                            <label style={S.label}>Rough Timeline *</label>
+                            <select value={proposalTimelineDays} onChange={e => setProposalTimelineDays(e.target.value)} style={S.input}>
+                                <option value="">Select estimated delivery time</option>
+                                {PROPOSAL_TIMELINE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                            </select>
+                            <p style={{ margin: '0.35rem 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Tell the client how many days you'll need to complete this work.</p>
+                        </div>
+
+                        <div>
+                            <label style={S.label}>Samples / Portfolio (Optional)</label>
+                            <p style={{ margin: '0 0 0.6rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>Share links to your previous work or upload files that show your skills.</p>
+
+                            <div style={{ display: 'flex', border: '1px solid var(--border-color)', borderRadius: 10, overflow: 'hidden' }}>
+                                <button type="button" onClick={() => setProposalPortfolioTab('links')} style={{ flex: 1, padding: '0.6rem', fontSize: '0.82rem', fontWeight: 700, border: 'none', cursor: 'pointer', background: proposalPortfolioTab === 'links' ? 'var(--bg-mint)' : 'var(--bg-elevated)', color: proposalPortfolioTab === 'links' ? 'var(--peacock-green)' : 'var(--text-secondary)' }}>
+                                    🔗 Add Links
+                                </button>
+                                <button type="button" onClick={() => setProposalPortfolioTab('files')} style={{ flex: 1, padding: '0.6rem', fontSize: '0.82rem', fontWeight: 700, border: 'none', borderLeft: '1px solid var(--border-color)', cursor: 'pointer', background: proposalPortfolioTab === 'files' ? 'var(--bg-mint)' : 'var(--bg-elevated)', color: proposalPortfolioTab === 'files' ? 'var(--peacock-green)' : 'var(--text-secondary)' }}>
+                                    ⬆️ Upload Files
+                                </button>
+                            </div>
+
+                            <div style={{ border: '1px solid var(--border-color)', borderTop: 'none', borderRadius: '0 0 10px 10px', padding: '1rem' }}>
+                                {proposalPortfolioTab === 'links' ? (
+                                    <>
+                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                            <input type="url" value={proposalLinkInput} onChange={e => setProposalLinkInput(e.target.value)} placeholder="Paste portfolio link, Behance, Drive link, etc." style={{ ...S.input, flex: 1 }} />
+                                            <button type="button" onClick={handleAddLink} className="btn-ghost" style={{ padding: '0 1.1rem', borderRadius: 8, border: '1px solid var(--peacock-green)', color: 'var(--peacock-green)', fontWeight: 700, fontSize: '0.82rem' }}>Add Link</button>
+                                        </div>
+                                        <div style={{ marginTop: '0.85rem' }}>
+                                            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Added Links</div>
+                                            {proposalLinks.length === 0 ? (
+                                                <div style={{ textAlign: 'center', padding: '1.5rem 1rem', background: 'var(--bg-elevated)', borderRadius: 10, border: '1px dashed var(--border-color)' }}>
+                                                    <div style={{ fontSize: '1.4rem', marginBottom: '0.4rem' }}>🔗</div>
+                                                    <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>No links added yet</div>
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Add portfolio links or work samples to build trust.</div>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                                    {proposalLinks.map((link, idx) => (
+                                                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.7rem', background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                                                            <span style={{ flex: 1, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{link}</span>
+                                                            <button type="button" onClick={() => handleRemoveLink(idx)} style={{ background: 'none', border: 'none', color: 'var(--accent-coral)', cursor: 'pointer', fontSize: '0.9rem' }}>✕</button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <input type="file" id="proposal-file-upload" multiple onChange={handleFilesSelected} style={{ display: 'none' }} />
+                                        <label htmlFor="proposal-file-upload" className="btn-ghost" style={{ display: 'block', textAlign: 'center', padding: '1.25rem', borderRadius: 10, border: '1px dashed var(--border-color)', cursor: 'pointer', background: 'var(--bg-elevated)' }}>
+                                            <div style={{ fontSize: '1.4rem', marginBottom: '0.4rem' }}>⬆️</div>
+                                            <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>Click to choose files</div>
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Any file type, multiple allowed</div>
+                                        </label>
+                                        {proposalFiles.length > 0 && (
+                                            <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                                {proposalFiles.map((f, idx) => (
+                                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.7rem', background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                                                        <span style={{ flex: 1, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📄 {f.name}</span>
+                                                        <button type="button" onClick={() => handleRemoveFile(idx)} style={{ background: 'none', border: 'none', color: 'var(--accent-coral)', cursor: 'pointer', fontSize: '0.9rem' }}>✕</button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
+                        <div style={{ padding: '0.85rem 1rem', borderRadius: 10, background: 'rgba(17,94,89,0.06)', border: '1px solid rgba(17,94,89,0.15)', fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'flex-start', gap: '0.6rem' }}>
+                            <span>🛡️</span>
+                            <div>
+                                <div style={{ fontWeight: 700, marginBottom: '0.15rem' }}>Keep your proposal professional</div>
+                                <div>Mention your experience, relevant skills and how you'll add value to this project.</div>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.75rem' }}>
+                            <button type="button" onClick={onBack} className="btn-ghost" style={{ padding: '0.75rem 1.5rem', borderRadius: 10 }}>Cancel</button>
+                            <button type="submit" disabled={submittingProposal || !canSubmit} className="btn-primary" style={{ flex: 1, padding: '0.75rem', borderRadius: 10, opacity: (submittingProposal || !canSubmit) ? 0.6 : 1, cursor: (submittingProposal || !canSubmit) ? 'not-allowed' : 'pointer' }}>
+                                {submittingProposal ? <ButtonSpinner label="Sending..." /> : '📨 Send Proposal'}
+                            </button>
+                        </div>
+                    </form>
+
+                    <div className="proposal-summary-desktop">{gigSummary}</div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div style={S.page}>
 
@@ -1353,7 +1624,7 @@ export default function Earn() {
 
                 {/* 1. MAIN CATEGORY GRID — 2x2 cards, not a pill row
                     (design-references/Mobile/Earn-tab.png) */}
-                {!viewingJob && !viewingGigDetail && !viewingGigStatus && (
+                {!viewingJob && !viewingGigDetail && !viewingGigStatus && !selectedGig && (
                     <div className="earn-category-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
                         {[
                             { id: 'jobs', icon: '💼', iconBg: 'var(--bg-mint)', title: 'Jobs', desc: 'Find freelance & full-time jobs' },
@@ -1521,7 +1792,9 @@ export default function Earn() {
                 {/* ── GIG WORK TAB ── */}
                 {activeMainTab === 'gigs' && (
                     <div>
-                        {viewingGigStatus ? (
+                        {selectedGig ? (
+                            <SendProposalView gig={selectedGig} onBack={() => setSelectedGig(null)} />
+                        ) : viewingGigStatus ? (
                             <GigStatusView
                                 gig={viewingGigStatus}
                                 onBack={() => setViewingGigStatus(null)}
@@ -2004,36 +2277,18 @@ export default function Earn() {
                 </div>
             )}
 
-            {/* Apply to Gig modal */}
-            {selectedGig && (
+            {/* Fallback success overlay — only reached if a Gig Room's
+                conversation_id somehow isn't available right after insert
+                (the DB trigger has been 100% reliable in testing, this is
+                a safety net, not the normal path). SendProposalView itself
+                replaced the old always-a-modal apply flow above. */}
+            {proposalSuccess && !selectedGig && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.15)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '1rem' }}>
-                    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 20, width: 480, maxWidth: '100%', padding: '2rem', animation: 'modalEntrance 0.3s ease-out', boxShadow: 'var(--shadow-lg)' }}>
-                        {!proposalSuccess ? (
-                            <>
-                                <h3 style={{ margin: '0 0 0.5rem 0', fontWeight: 900 }}>Send Proposal ⚡</h3>
-                                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.25rem', lineHeight: 1.5 }}>You are proposing to work on <strong>{selectedGig.title}</strong> for {selectedGig.client_name || 'this client'}.</p>
-                                
-                                <form onSubmit={handleApplyGig} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>Your Pitch</label>
-                                        <textarea rows={4} value={proposalMsg} onChange={e => setProposalMsg(e.target.value)} placeholder="Introduce yourself, mention relevant skills, and explain why you're a good fit..." style={{ ...S.input, resize: 'vertical' }} required />
-                                    </div>
-                                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
-                                        <button type="button" onClick={() => setSelectedGig(null)} className="btn-ghost" style={{ padding: '0.65rem 1.25rem', borderRadius: 10 }}>Cancel</button>
-                                        <button type="submit" disabled={submittingProposal} className="btn-primary" style={{ flex: 1, padding: '0.75rem', borderRadius: 10 }}>
-                                            {submittingProposal ? <ButtonSpinner label="Sending..." /> : 'Submit Proposal ✈️'}
-                                        </button>
-                                    </div>
-                                </form>
-                            </>
-                        ) : (
-                            <div style={{ textAlign: 'center' }}>
-                                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎉</div>
-                                <h3 style={{ margin: '0 0 0.5rem 0', fontWeight: 900, color: 'var(--peacock-green)' }}>Proposal Sent!</h3>
-                                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Your pitch has been sent securely. You will be redirected to Messages.</p>
-                                <button onClick={() => setSelectedGig(null)} className="btn-primary" style={{ width: '100%', padding: '0.75rem', borderRadius: 10 }}>Got it</button>
-                            </div>
-                        )}
+                    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 20, width: 420, maxWidth: '100%', padding: '2rem', animation: 'modalEntrance 0.3s ease-out', boxShadow: 'var(--shadow-lg)', textAlign: 'center' }}>
+                        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎉</div>
+                        <h3 style={{ margin: '0 0 0.5rem 0', fontWeight: 900, color: 'var(--peacock-green)' }}>Proposal Sent!</h3>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>Your proposal has been sent securely.</p>
+                        <button onClick={() => setProposalSuccess(false)} className="btn-primary" style={{ width: '100%', padding: '0.75rem', borderRadius: 10 }}>Got it</button>
                     </div>
                 </div>
             )}

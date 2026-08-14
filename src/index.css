@@ -582,3 +582,38 @@ body {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ══════════════════════════════════════
+   SEND PROPOSAL SCREEN (A3)
+   Mobile-first: gig summary card stacks above
+   the form; desktop: form + summary sidebar.
+   !important used defensively from the start here —
+   the sidebar div also carries the S.card inline style
+   (display: 'flex'), which otherwise beats a plain
+   stylesheet rule regardless of source order (this bit
+   the Gig Status screen's CSS in Phase 1b).
+   ══════════════════════════════════════ */
+.proposal-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+.proposal-summary-mobile {
+  margin-bottom: 1.25rem;
+}
+.proposal-summary-desktop {
+  display: none !important;
+}
+
+@media (min-width: 769px) {
+  .proposal-grid {
+    grid-template-columns: 2fr 1fr;
+  }
+  .proposal-summary-mobile {
+    display: none !important;
+  }
+  .proposal-summary-desktop {
+    display: flex !important;
+  }
+}
