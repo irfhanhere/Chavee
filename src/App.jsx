@@ -5,7 +5,7 @@ import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-do
 import AppShell   from './components/AppShell.jsx';
 
 // Pages
-import Landing    from './pages/Landing.jsx';
+import AppOpening from './pages/AppOpening.jsx';
 import Login from './pages/Login.jsx';
 import SignUp from './pages/SignUp.jsx';
 import ForgotPassword from './pages/ForgotPassword.jsx';
@@ -43,6 +43,7 @@ import Onboarding from './pages/Onboarding.jsx';
 import AdminShell          from './pages/admin/AdminShell.jsx';
 import AdminDashboard      from './pages/admin/AdminDashboard.jsx';
 import CommunitiesManager  from './pages/admin/sections/CommunitiesManager.jsx';
+import CreateCommunityWizard from './pages/admin/sections/CreateCommunityWizard.jsx';
 import PostsManager        from './pages/admin/sections/PostsManager.jsx';
 import CoursesManager      from './pages/admin/sections/CoursesManager.jsx';
 import ScholarshipsManager from './pages/admin/sections/ScholarshipsManager.jsx';
@@ -50,6 +51,7 @@ import JobsManager         from './pages/admin/sections/JobsManager.jsx';
 import EventsManager       from './pages/admin/sections/EventsManager.jsx';
 import UsersManager        from './pages/admin/sections/UsersManager.jsx';
 import GigsManager         from './pages/admin/sections/GigsManager.jsx';
+import GigModerationQueue  from './pages/admin/sections/GigModerationQueue.jsx';
 import ContentManager      from './pages/admin/sections/ContentManager.jsx';
 import ReportsManager      from './pages/admin/sections/ReportsManager.jsx';
 import SubscribersManager  from './pages/admin/sections/SubscribersManager.jsx';
@@ -93,12 +95,12 @@ function NotFound() {
                 marginTop: '1rem',
                 padding: '1rem 2rem',
                 borderRadius: '12px',
-                background: '#0B8F5A',
+                background: 'var(--peacock-green)',
                 color: '#FFFFFF',
                 textDecoration: 'none',
                 fontWeight: 700,
                 fontSize: '1.05rem',
-                boxShadow: '0 8px 20px rgba(11,143,90,0.2)',
+                boxShadow: '0 8px 20px rgba(17, 94, 89,0.2)',
                 transition: 'all 0.2s',
             }}
             onMouseOver={e => e.target.style.transform = 'translateY(-2px)'}
@@ -127,7 +129,7 @@ export default function App() {
             <ScrollToTop />
             <Routes>
                 {/* ── Public routes (own layouts) ── */}
-                <Route path="/"        element={<Landing />} />
+                <Route path="/"        element={<AppOpening />} />
                 <Route path="/login"   element={<Login />} />
                 <Route path="/signup"  element={<SignUp />} />
                 <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -180,6 +182,7 @@ export default function App() {
                 {/* ── Admin panel ── */}
                 <Route path="/admin"              element={<AdminShell><AdminDashboard /></AdminShell>} />
                 <Route path="/admin/communities"  element={<AdminShell><CommunitiesManager /></AdminShell>} />
+                <Route path="/admin/communities/new" element={<AdminShell><CreateCommunityWizard /></AdminShell>} />
                 <Route path="/admin/posts"        element={<AdminShell><PostsManager /></AdminShell>} />
                 <Route path="/admin/content"      element={<AdminShell><ContentManager /></AdminShell>} />
                 <Route path="/admin/education"    element={<AdminShell><EducationManager /></AdminShell>} />
@@ -189,6 +192,7 @@ export default function App() {
                 <Route path="/admin/resources"    element={<AdminShell><ResourcesManager /></AdminShell>} />
                 <Route path="/admin/jobs"         element={<AdminShell><JobsManager /></AdminShell>} />
                 <Route path="/admin/gigs"         element={<AdminShell><GigsManager /></AdminShell>} />
+                <Route path="/admin/gig-moderation" element={<AdminShell><GigModerationQueue /></AdminShell>} />
                 <Route path="/admin/events"       element={<AdminShell><EventsManager /></AdminShell>} />
                 <Route path="/admin/users"        element={<AdminShell><UsersManager /></AdminShell>} />
                 <Route path="/admin/reports"      element={<AdminShell><ReportsManager /></AdminShell>} />

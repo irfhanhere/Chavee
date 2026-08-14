@@ -21,6 +21,9 @@ const NAV = [
     },
     { path: '/admin/jobs',         icon: '💼', label: 'Jobs' },
     { path: '/admin/gigs',         icon: '⚡', label: 'Gigs' },
+    // Separate path (not /admin/gigs/...) on purpose — isActive() below uses
+    // startsWith(), so a nested path would light up both nav items at once.
+    { path: '/admin/gig-moderation', icon: '🛡️', label: 'Gig Moderation' },
     { path: '/admin/events',       icon: '🎪', label: 'Events' },
     { path: '/admin/users',        icon: '👥', label: 'Users' },
     { path: '/admin/reports',      icon: '🚩', label: 'Reports' },
@@ -61,14 +64,17 @@ export default function AdminShell({ children }) {
             if (!session) { navigate('/login'); return; }
             setUser(session.user);
 
-            // Admin guard — check status using Postgres RPC function or email pattern
-            let isAdmin = false;
-            if (session.user?.email && (session.user.email.includes('admin') || session.user.email.includes('qa_user'))) {
-                isAdmin = true;
-            } else {
-                const { data } = await supabase.rpc('is_admin');
-                isAdmin = !!data;
-            }
+            // Admin guard — real is_admin() RPC only. This used to also trust
+            // any account whose email merely contained "admin" or "qa_user"
+            // as a client-side-only bypass, with zero backing in the actual
+            // `admins` table or the events/admins RLS policies (confirmed
+            // live: is_admin() returns false and there's no admins row for
+            // an "admin_..." test account that could still reach this whole
+            // panel, including Add/Edit/Delete on every manager). Removed —
+            // the client-side gate now agrees with what the database
+            // actually enforces, instead of quietly disagreeing with it.
+            const { data } = await supabase.rpc('is_admin');
+            const isAdmin = !!data;
 
             if (!isAdmin) {
                 navigate('/dashboard');
