@@ -128,22 +128,54 @@ export default function GigModerationQueue() {
             const { error: statusErr } = await supabase.from('gigs').update({ status: 'active' }).eq('id', gig.id);
             if (statusErr) throw statusErr;
 
+            // profiles.gig_auto_approve can't be written directly by an admin
+            // updating someone else's row — confirmed by direct testing that
+            // RLS silently drops cross-user profile UPDATEs (0 rows, no
+            // error). gigs allows admin cross-user writes; profiles doesn't.
+            // admin_set_gig_auto_approve is a SECURITY DEFINER RPC (same
+            // pattern as admin_moderate_gig) that's admin-gated internally
+            // via is_admin(), so it bypasses that RLS gap correctly instead
+            // of trying to punch a hole in it from the client.
+            let autoTrusted = false;
             if (trust) {
-                const { error: trustErr } = await supabase.from('profiles').update({ gig_auto_approve: true }).eq('id', gig.posted_by);
+                const { error: trustErr } = await supabase.rpc('admin_set_gig_auto_approve', { p_user_id: gig.posted_by, p_value: true });
                 if (trustErr) throw trustErr;
+            } else {
+                // Step 6 — automatic trust: 3 gigs at 'active' with zero
+                // rejections. "Zero rejections" can only mean zero gigs
+                // *currently* sitting in status='rejected' — there's no
+                // rejection-history table, so a gig that was once rejected,
+                // then edited and resubmitted successfully, has that history
+                // overwritten the moment its status flips to 'active'.
+                const { data: posterGigs, error: posterGigsErr } = await supabase
+                    .from('gigs').select('status').eq('posted_by', gig.posted_by);
+                if (posterGigsErr) {
+                    console.error('Failed to check auto-trust eligibility:', posterGigsErr);
+                } else {
+                    const activeCount = (posterGigs || []).filter(g => g.status === 'active').length;
+                    const hasRejected = (posterGigs || []).some(g => g.status === 'rejected');
+                    if (activeCount >= 3 && !hasRejected) {
+                        const { error: autoTrustErr } = await supabase
+                            .rpc('admin_set_gig_auto_approve', { p_user_id: gig.posted_by, p_value: true });
+                        if (autoTrustErr) console.error('Failed to auto-trust poster:', autoTrustErr);
+                        else autoTrusted = true;
+                    }
+                }
             }
 
             const { error: notifErr } = await supabase.from('notifications').insert({
                 user_id: gig.posted_by,
                 type: 'gig_approved',
                 title: '💼 Gig Listing Approved!',
-                body: `Your gig "${gig.title}" has been reviewed and approved. It is now visible on the marketplace.` + (trust ? ' Future gigs you post will go live immediately, without review.' : ''),
+                body: `Your gig "${gig.title}" has been reviewed and approved. It is now visible on the marketplace.` + ((trust || autoTrusted) ? ' Future gigs you post will go live immediately, without review.' : ''),
                 link: '/earn',
                 is_read: false,
             });
             if (notifErr) console.error('Failed to write approval notification:', notifErr);
 
-            showToast(trust ? `✅ Approved — ${gig.poster?.full_name || 'poster'} is now trusted` : '✅ Gig approved and live');
+            if (trust) showToast(`✅ Approved — ${gig.poster?.full_name || 'poster'} is now trusted`);
+            else if (autoTrusted) showToast(`✅ Gig approved and live — ${gig.poster?.full_name || 'poster'} auto-trusted after 3 clean approvals!`);
+            else showToast('✅ Gig approved and live');
             setRows(prev => prev.filter(r => r.id !== gig.id));
         } catch (err) {
             console.error('Approve failed:', err);
