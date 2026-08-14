@@ -1198,6 +1198,28 @@ export default function Earn() {
     const GigDetailView = ({ gig, onBack }) => {
         const isOwnGig = Boolean(user && gig.posted_by === user.id);
         const hasApplied = Boolean(gigApplicationLookup[gig.id]);
+
+        // A2 gap closure (Group 2 Step 4) — only the two honestly-real
+        // poster stats. No Response Rate / Rating / Last Active: confirmed
+        // in the Group 2 investigation that no real data backs any of them
+        // (no reviews table, profiles.last_active_at is never written).
+        const [posterStats, setPosterStats] = useState(null);
+        useEffect(() => {
+            if (!gig.posted_by) return;
+            let cancelled = false;
+            Promise.all([
+                supabase.from('gigs').select('id', { count: 'exact', head: true }).eq('posted_by', gig.posted_by),
+                supabase.from('profiles').select('created_at').eq('id', gig.posted_by).single(),
+            ]).then(([gigsCountRes, profileRes]) => {
+                if (cancelled) return;
+                setPosterStats({
+                    gigsPosted: gigsCountRes.count || 0,
+                    memberSince: profileRes.data?.created_at || null,
+                });
+            });
+            return () => { cancelled = true; };
+        }, [gig.posted_by]);
+
         return (
             <div style={{ animation: 'fadeInUp 0.3s ease-out' }}>
                 <button onClick={onBack} className="btn-ghost" style={{ padding: '0.5rem 1rem', borderRadius: 8, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -1240,6 +1262,39 @@ export default function Earn() {
                                 <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, whiteSpace: 'pre-wrap', margin: 0 }}>{gig.requirements || gig.skills}</p>
                             </div>
                         )}
+
+                        <div>
+                            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: '0 0 0.75rem 0' }}>Attachments</h3>
+                            {/* No attachment column/table exists for gigs (same gap flagged
+                                in Phase 1b's GigStatusView) — honest "No attachments" rather
+                                than inventing files the mockup shows. */}
+                            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <span>📎</span> No attachments
+                            </p>
+                        </div>
+
+                        <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '1.25rem' }}>
+                            <h3 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.85rem 0' }}>Posted by</h3>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', marginBottom: posterStats ? '1rem' : 0 }}>
+                                <div>
+                                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Gigs Posted</div>
+                                    <div style={{ fontSize: '1.1rem', fontWeight: 800 }}>{posterStats ? posterStats.gigsPosted : '—'}</div>
+                                </div>
+                                <div>
+                                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Member Since</div>
+                                    <div style={{ fontSize: '1.1rem', fontWeight: 800 }}>
+                                        {posterStats?.memberSince
+                                            ? new Date(posterStats.memberSince).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+                                            : '—'}
+                                    </div>
+                                </div>
+                            </div>
+                            {gig.posted_by && (
+                                <Link to={`/profile/${gig.posted_by}`} style={{ display: 'inline-block', padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid var(--peacock-green)', color: 'var(--peacock-green)', fontSize: '0.82rem', fontWeight: 700, textDecoration: 'none' }}>
+                                    View Poster Profile
+                                </Link>
+                            )}
+                        </div>
                     </div>
 
                     <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
