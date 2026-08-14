@@ -46,6 +46,33 @@ const REJECTION_REASON_COPY = {
     duplicate_posting: "This looks like a duplicate of a gig you've already posted. If it's genuinely different, make that clearer in the description.",
 };
 
+// A8's expanded-row file list — resolves a proposal_files entry
+// ({path, name, type, size}) to a real signed URL against the private
+// proposal-attachments bucket set up in Group 2 Step 1.
+function ProposalFileLink({ file }) {
+    const [signedUrl, setSignedUrl] = useState(null);
+
+    useEffect(() => {
+        if (!file?.path) return;
+        let cancelled = false;
+        getAttachmentSignedUrl(file.path, { bucket: PROPOSAL_ATTACHMENTS_BUCKET, ttl: 300 })
+            .then(url => { if (!cancelled && url) setSignedUrl(url); });
+        return () => { cancelled = true; };
+    }, [file?.path]);
+
+    return (
+        <a
+            href={signedUrl || '#'}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => { e.stopPropagation(); if (!signedUrl) e.preventDefault(); }}
+            style={{ fontSize: '0.8rem', color: 'var(--peacock-green)', textDecoration: 'underline', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        >
+            📄 {signedUrl ? file.name : `Loading ${file.name}...`}
+        </a>
+    );
+}
+
 const gigTimeAgo = (date) => {
     if (!date) return '';
     const diff = (new Date() - new Date(date)) / 1000;
@@ -179,9 +206,12 @@ export default function Earn() {
     const [loadingMyGigWorks, setLoadingMyGigWorks] = useState(false);
     const [applyingGigId, setApplyingGigId] = useState(null);
     const [deletingGigId, setDeletingGigId] = useState(null);
-    const [proposalsOpen, setProposalsOpen] = useState(false);
+    const [viewingGigProposals, setViewingGigProposals] = useState(null); // A8 — the gig whose proposals are being viewed
     const [currentProposals, setCurrentProposals] = useState([]);
     const [loadingProposals, setLoadingProposals] = useState(false);
+    const [withdrawnProposalCount, setWithdrawnProposalCount] = useState(0);
+    const [applicantCompletedCounts, setApplicantCompletedCounts] = useState({});
+    const [expandedProposalId, setExpandedProposalId] = useState(null);
     const [proposalCounts, setProposalCounts] = useState({});
     const [completingGigAppId, setCompletingGigAppId] = useState(null);
     const [resolvingChat, setResolvingChat] = useState(null);
@@ -717,11 +747,38 @@ export default function Earn() {
                 .eq('gig_id', gigId)
                 .order('created_at', { ascending: false });
             if (error) throw error;
-            setCurrentProposals(data || []);
+
+            // Withdrawn proposals are excluded from the list by design (a
+            // poster doesn't need to see ones the applicant pulled back) —
+            // shown only as a low-key count, not full rows.
+            const visible = (data || []).filter(p => p.status !== 'withdrawn');
+            const withdrawnCount = (data || []).length - visible.length;
+            setCurrentProposals(visible);
+            setWithdrawnProposalCount(withdrawnCount);
+
+            // "Completed gigs" per applicant — real, computable count (Group 2
+            // point 4's honesty standard): gig_applications where that
+            // applicant_id has status='completed', the same definition the
+            // A4 "Mark Completed" action already writes.
+            const applicantIds = [...new Set(visible.map(p => p.applicant_id).filter(Boolean))];
+            if (applicantIds.length) {
+                const { data: completedRows } = await supabase
+                    .from('gig_applications')
+                    .select('applicant_id')
+                    .eq('status', 'completed')
+                    .in('applicant_id', applicantIds);
+                const counts = {};
+                (completedRows || []).forEach(r => { counts[r.applicant_id] = (counts[r.applicant_id] || 0) + 1; });
+                setApplicantCompletedCounts(counts);
+            } else {
+                setApplicantCompletedCounts({});
+            }
         } catch (err) {
             console.error('Error loading proposals:', err);
             showToast('Failed to load proposals: ' + (err.message || String(err)), 'error');
             setCurrentProposals([]);
+            setWithdrawnProposalCount(0);
+            setApplicantCompletedCounts({});
         } finally {
             setLoadingProposals(false);
         }
@@ -1195,7 +1252,7 @@ export default function Earn() {
                                 {hasApplied ? 'Proposal Sent ✓' : 'Submit Proposal ⚡'}
                             </button>
                         ) : (
-                            <button onClick={() => { setProposalsOpen(true); loadProposalsForGig(gig.id); }} className="btn-primary" style={{ padding: '0.65rem 2rem', borderRadius: 8 }}>
+                            <button onClick={() => { setViewingGigProposals(gig); setExpandedProposalId(null); loadProposalsForGig(gig.id); }} className="btn-primary" style={{ padding: '0.65rem 2rem', borderRadius: 8 }}>
                                 View Proposals
                             </button>
                         )}
@@ -1596,6 +1653,390 @@ export default function Earn() {
         );
     };
 
+    // A4 — My Proposals. New dedicated view (replaces the old plain "My Gig
+    // Works" card grid) with the four tabs bucketed as resolved in the
+    // Group 2 investigation:
+    //   1. latest linked gig_offers row status='accepted' -> Converted
+    //   2. latest offer status='declined'                 -> Declined
+    //   3. application.status='discussing' OR latest offer
+    //      status='countered'                              -> Chat Started
+    //   4. otherwise (status='applied', no offer)          -> Sent
+    // "Latest" offer = most recent by created_at, not parent_offer_id
+    // chain-walking — confirmed empirically that chains don't reliably
+    // link across negotiation rounds (a fresh round can start a new root
+    // offer with parent_offer_id null, unlinked to the prior round).
+    // Withdrawn applications (status='withdrawn') are excluded from all
+    // four tabs entirely — bucket is null and they're filtered out.
+    const MyProposalsView = () => {
+        const [proposals, setProposals] = useState([]);
+        const [loadingProposalsList, setLoadingProposalsList] = useState(true);
+        const [activeProposalTab, setActiveProposalTab] = useState('sent');
+        const [withdrawingId, setWithdrawingId] = useState(null);
+
+        const loadMyProposals = async () => {
+            if (!user) return;
+            setLoadingProposalsList(true);
+            try {
+                const { data: apps, error } = await supabase
+                    .from('gig_applications')
+                    .select('*')
+                    .eq('applicant_id', user.id)
+                    .order('created_at', { ascending: false });
+                if (error) throw error;
+
+                const gigIds = [...new Set((apps || []).map(a => a.gig_id).filter(Boolean))];
+                let gigsMap = {};
+                if (gigIds.length) {
+                    const { data: gigs } = await supabase.from('gigs').select('*').in('id', gigIds);
+                    (gigs || []).forEach(g => { gigsMap[g.id] = g; });
+                }
+
+                const appIds = (apps || []).map(a => a.id);
+                let latestOfferByApp = {};
+                if (appIds.length) {
+                    // Ascending order so the last write per key wins — the
+                    // most recent offer, matching the empirically-confirmed
+                    // "most-recent-by-created_at" rule, not chain-walking.
+                    const { data: offers } = await supabase
+                        .from('gig_offers')
+                        .select('gig_application_id, status, created_at')
+                        .in('gig_application_id', appIds)
+                        .order('created_at', { ascending: true });
+                    (offers || []).forEach(o => { latestOfferByApp[o.gig_application_id] = o; });
+                }
+
+                const enriched = (apps || []).map(a => {
+                    const latestOffer = latestOfferByApp[a.id] || null;
+                    let bucket = null;
+                    if (a.status !== 'withdrawn') {
+                        if (latestOffer?.status === 'accepted') bucket = 'converted';
+                        else if (latestOffer?.status === 'declined') bucket = 'declined';
+                        else if (a.status === 'discussing' || latestOffer?.status === 'countered') bucket = 'chatStarted';
+                        else bucket = 'sent';
+                    }
+                    return { ...a, gig: gigsMap[a.gig_id] || null, latestOffer, bucket };
+                });
+
+                setProposals(enriched);
+            } catch (err) {
+                console.error('Failed to load proposals:', err);
+                showToast('Failed to load your proposals.', 'error');
+            } finally {
+                setLoadingProposalsList(false);
+            }
+        };
+
+        useEffect(() => { loadMyProposals(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+        const handleWithdrawProposal = async (application) => {
+            const confirmed = window.confirm(`Withdraw your proposal for "${application.gig?.title || 'this gig'}"? The gig room stays open — this only marks your proposal as withdrawn.`);
+            if (!confirmed) return;
+            setWithdrawingId(application.id);
+            try {
+                const { error } = await supabase.from('gig_applications').update({ status: 'withdrawn' }).eq('id', application.id);
+                if (error) throw error;
+                showToast('Proposal withdrawn.', 'success');
+                setProposals(prev => prev.map(p => p.id === application.id ? { ...p, status: 'withdrawn', bucket: null } : p));
+            } catch (err) {
+                console.error('Failed to withdraw proposal:', err);
+                showToast('Failed to withdraw proposal: ' + err.message, 'error');
+            } finally {
+                setWithdrawingId(null);
+            }
+        };
+
+        const TABS = [
+            { key: 'sent', label: 'Sent' },
+            { key: 'chatStarted', label: 'Chat Started' },
+            { key: 'declined', label: 'Declined' },
+            { key: 'converted', label: 'Converted' },
+        ];
+        const counts = TABS.reduce((acc, t) => {
+            acc[t.key] = proposals.filter(p => p.bucket === t.key).length;
+            return acc;
+        }, {});
+        const visibleProposals = proposals.filter(p => p.bucket === activeProposalTab);
+
+        const STATUS_PILL = {
+            sent: { label: 'Sent', bg: 'rgba(245,158,11,0.1)', color: 'var(--accent-gold)' },
+            chatStarted: { label: 'Chat Started', bg: 'rgba(59,130,246,0.1)', color: '#2563EB' },
+            declined: { label: 'Declined', bg: 'rgba(239,68,68,0.1)', color: 'var(--accent-coral)' },
+            converted: { label: 'Converted', bg: 'rgba(16,185,129,0.1)', color: 'var(--peacock-green)' },
+        };
+
+        return (
+            <div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+                    {TABS.map(t => (
+                        <button
+                            key={t.key}
+                            onClick={() => setActiveProposalTab(t.key)}
+                            style={{
+                                padding: '0.5rem 1rem', borderRadius: 10, display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                background: activeProposalTab === t.key ? 'var(--peacock-green)' : 'var(--bg-surface)',
+                                color: activeProposalTab === t.key ? '#fff' : 'var(--text-secondary)',
+                                border: '1px solid', borderColor: activeProposalTab === t.key ? 'var(--peacock-green)' : 'var(--border-color)',
+                                fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer'
+                            }}
+                        >
+                            {t.label}
+                            <span style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, borderRadius: 9, padding: '0 0.3rem', fontSize: '0.68rem', fontWeight: 800,
+                                background: activeProposalTab === t.key ? 'rgba(255,255,255,0.25)' : 'var(--bg-elevated)',
+                                color: activeProposalTab === t.key ? '#fff' : 'var(--text-muted)'
+                            }}>
+                                {counts[t.key]}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+
+                {loadingProposalsList ? (
+                    <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '4rem 2rem' }}>Loading your proposals...</div>
+                ) : visibleProposals.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '4rem 2rem', background: 'var(--bg-surface)', border: '1px dashed var(--border-color)', borderRadius: 16 }}>
+                        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📋</div>
+                        <h3 style={{ margin: '0 0 0.5rem', fontWeight: 800 }}>Nothing here yet</h3>
+                        <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.9rem' }}>
+                            {activeProposalTab === 'sent' && "Proposals waiting on a response show up here."}
+                            {activeProposalTab === 'chatStarted' && "Proposals the poster has engaged with show up here."}
+                            {activeProposalTab === 'declined' && "Declined offers show up here."}
+                            {activeProposalTab === 'converted' && "Proposals that turned into an accepted offer show up here."}
+                        </p>
+                    </div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        {visibleProposals.map(p => {
+                            const pill = STATUS_PILL[p.bucket];
+                            return (
+                                <div key={p.id} style={{ ...S.card, gap: '0.75rem' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start' }}>
+                                        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', minWidth: 0 }}>
+                                            <div style={{ fontSize: '1.4rem', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', borderRadius: 10, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>⚡</div>
+                                            <div style={{ minWidth: 0 }}>
+                                                <h4 style={{ margin: 0, fontWeight: 800, fontSize: '0.92rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.gig?.title || 'Gig no longer available'}</h4>
+                                                {p.gig?.category && (
+                                                    <span style={{ display: 'inline-block', marginTop: '0.25rem', fontSize: '0.68rem', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', padding: '0.15rem 0.5rem', borderRadius: 20, fontWeight: 600 }}>
+                                                        {p.gig.category.split(',')[0].trim()}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '0.25rem 0.6rem', borderRadius: 999, background: pill.bg, color: pill.color, whiteSpace: 'nowrap' }}>{pill.label}</span>
+                                    </div>
+
+                                    <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                                        {p.proposed_price != null && <span>₹{Number(p.proposed_price).toLocaleString('en-IN')}</span>}
+                                        {p.estimated_days != null && <span>• {p.estimated_days} day{p.estimated_days === 1 ? '' : 's'}</span>}
+                                    </div>
+
+                                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                                        {p.pitch}
+                                    </p>
+
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Applied {gigTimeAgo(p.created_at)}</div>
+
+                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                                        {p.bucket === 'sent' && (
+                                            <button
+                                                onClick={() => handleWithdrawProposal(p)}
+                                                disabled={withdrawingId === p.id}
+                                                style={{ padding: '0.45rem 0.8rem', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700, background: 'transparent', border: '1px solid var(--accent-coral)', color: 'var(--accent-coral)', cursor: withdrawingId === p.id ? 'not-allowed' : 'pointer', opacity: withdrawingId === p.id ? 0.6 : 1 }}
+                                            >
+                                                {withdrawingId === p.id ? 'Withdrawing...' : '✈️ Withdraw Proposal'}
+                                            </button>
+                                        )}
+                                        {/* Not part of the A4 mockup's action set, but this is the only
+                                            entry point complete_gig_application (real XP-granting flow)
+                                            had before this screen replaced the old card grid — removing
+                                            it entirely would silently orphan working functionality, so
+                                            it's kept here on Converted rows, the only bucket where
+                                            "this became real work" is actually true. */}
+                                        {p.bucket === 'converted' && (
+                                            p.status === 'completed' ? (
+                                                <span style={{ padding: '0.45rem 0.8rem', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700, background: 'var(--bg-mint)', border: '1px solid var(--border-mint)', color: 'var(--peacock-green)' }}>
+                                                    Completed ✓
+                                                </span>
+                                            ) : (
+                                                <button
+                                                    onClick={async () => { await handleCompleteGigApplication(p); loadMyProposals(); }}
+                                                    disabled={completingGigAppId === p.id}
+                                                    className="btn-primary"
+                                                    style={{ padding: '0.45rem 0.8rem', borderRadius: 8, fontSize: '0.78rem' }}
+                                                >
+                                                    {completingGigAppId === p.id ? 'Completing...' : 'Mark Completed ✓'}
+                                                </button>
+                                            )
+                                        )}
+                                        {p.gig && (
+                                            <button
+                                                onClick={() => setViewingGigDetail(p.gig)}
+                                                style={{ padding: '0.45rem 0.8rem', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700, background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                                            >
+                                                👁 View Gig
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => navigate(`/messages?id=${p.conversation_id}`)}
+                                            disabled={!p.conversation_id}
+                                            style={{ marginLeft: 'auto', padding: '0.45rem 0.8rem', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700, background: 'transparent', border: 'none', color: p.conversation_id ? 'var(--peacock-green)' : 'var(--text-muted)', cursor: p.conversation_id ? 'pointer' : 'not-allowed' }}
+                                        >
+                                            View Proposal ›
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    // A8 — Proposals on My Gig (poster's view). Full page (replaces the old
+    // small "Gig Proposals" modal), row layout per design-references/
+    // gig-screens/A8-proposals-on-gig-mobile.png.png. A9 fold-in: tapping a
+    // row expands it in place to show the full pitch + portfolio links/
+    // files, rather than a separate Proposal Detail screen — per the
+    // Group 2 decision that A9 didn't earn its own screen once the room
+    // opens instantly anyway.
+    const GigProposalsView = ({ gig, onBack }) => {
+        const handleExpandToggle = (proposalId) => {
+            setExpandedProposalId(prev => prev === proposalId ? null : proposalId);
+        };
+
+        return (
+            <div style={{ animation: 'fadeInUp 0.3s ease-out' }}>
+                <button onClick={onBack} className="btn-ghost" style={{ padding: '0.5rem 1rem', borderRadius: 8, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    ← Back to My Gigs
+                </button>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span onClick={onBack} style={{ color: 'var(--peacock-green)', fontWeight: 700, cursor: 'pointer' }}>Earn</span>
+                    <span>›</span>
+                    <span style={{ color: 'var(--peacock-green)', fontWeight: 700 }}>Gig</span>
+                    <span>›</span>
+                    <span onClick={onBack} style={{ color: 'var(--peacock-green)', fontWeight: 700, cursor: 'pointer' }}>My Gigs</span>
+                    <span>›</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{gig.title}</span>
+                    <span>›</span>
+                    <span>Proposals</span>
+                </div>
+
+                <div style={{ ...S.card, flexDirection: 'row', alignItems: 'center', gap: '0.85rem', marginBottom: '1.25rem' }}>
+                    <div style={{ fontSize: '1.6rem', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', borderRadius: 12, width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>⚡</div>
+                    <div style={{ minWidth: 0 }}>
+                        <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>{gig.title}</h2>
+                        <span style={{ display: 'inline-block', marginTop: '0.3rem', fontSize: '0.72rem', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', padding: '0.2rem 0.6rem', borderRadius: 20, fontWeight: 600 }}>
+                            {(gig.category || 'General').split(',')[0].trim()}
+                        </span>
+                    </div>
+                </div>
+
+                {loadingProposals ? (
+                    <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '4rem 2rem' }}>Loading proposals...</div>
+                ) : currentProposals.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '4rem 2rem', background: 'var(--bg-surface)', border: '1px dashed var(--border-color)', borderRadius: 16 }}>
+                        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📭</div>
+                        <h3 style={{ margin: '0 0 0.5rem', fontWeight: 800 }}>No proposals yet</h3>
+                        <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.9rem' }}>Check back soon — applicants will show up here.</p>
+                    </div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        {currentProposals.map(proposal => {
+                            const applicantName = proposal.profiles?.full_name || proposal.profiles?.username || 'Anonymous';
+                            const avatarUrl = proposal.profiles?.avatar_url;
+                            const initials = applicantName.split(' ').slice(0, 2).map(part => part[0] || '').join('').toUpperCase() || '?';
+                            const isExpanded = expandedProposalId === proposal.id;
+                            const alreadyEngaged = proposal.status !== 'applied';
+                            const completedCount = applicantCompletedCounts[proposal.applicant_id] || 0;
+                            const links = Array.isArray(proposal.portfolio_links) ? proposal.portfolio_links : [];
+                            const files = Array.isArray(proposal.portfolio_files) ? proposal.portfolio_files : [];
+
+                            return (
+                                <div key={proposal.id} style={S.card}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start', cursor: 'pointer' }} onClick={() => handleExpandToggle(proposal.id)}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
+                                            {avatarUrl ? (
+                                                <img src={avatarUrl} alt={applicantName} style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+                                            ) : (
+                                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--bg-mint)', color: 'var(--peacock-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9rem', flexShrink: 0 }}>
+                                                    {initials}
+                                                </div>
+                                            )}
+                                            <div style={{ minWidth: 0 }}>
+                                                <div style={{ fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{applicantName}</div>
+                                                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{completedCount} completed gig{completedCount === 1 ? '' : 's'}</div>
+                                            </div>
+                                        </div>
+                                        <span style={{ fontSize: '1.1rem', color: 'var(--text-muted)', flexShrink: 0, transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>⌄</span>
+                                    </div>
+
+                                    <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600, marginTop: '0.6rem' }}>
+                                        {proposal.proposed_price != null && <span>₹{Number(proposal.proposed_price).toLocaleString('en-IN')}</span>}
+                                        {proposal.estimated_days != null && <span>• {proposal.estimated_days} day{proposal.estimated_days === 1 ? '' : 's'}</span>}
+                                        <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontWeight: 400 }}>{gigTimeAgo(proposal.created_at)}</span>
+                                    </div>
+
+                                    <p style={{
+                                        margin: '0.6rem 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+                                        ...(isExpanded ? {} : { overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' })
+                                    }}>
+                                        {proposal.pitch}
+                                    </p>
+
+                                    {isExpanded && (links.length > 0 || files.length > 0) && (
+                                        <div style={{ marginTop: '0.85rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                                            {links.length > 0 && (
+                                                <div>
+                                                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '0.4rem' }}>Portfolio Links</div>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                                        {links.map((link, idx) => (
+                                                            <a key={idx} href={link} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: '0.8rem', color: 'var(--peacock-green)', textDecoration: 'underline', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                🔗 {link}
+                                                            </a>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {files.length > 0 && (
+                                                <div>
+                                                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '0.4rem' }}>Attached Files</div>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                                        {files.map((file, idx) => (
+                                                            <ProposalFileLink key={idx} file={file} />
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.85rem' }} onClick={e => e.stopPropagation()}>
+                                        {alreadyEngaged ? (
+                                            <button onClick={() => navigate(`/messages?id=${proposal.conversation_id}`)} disabled={!proposal.conversation_id} className="btn-ghost" style={{ padding: '0.5rem 1rem', borderRadius: 8, fontSize: '0.8rem', border: '1px solid var(--border-color)', flex: 1 }}>
+                                                Message
+                                            </button>
+                                        ) : (
+                                            <button onClick={() => handleDiscuss(proposal.id, proposal.conversation_id)} disabled={!proposal.conversation_id} className="btn-primary" style={{ padding: '0.5rem 1rem', borderRadius: 8, fontSize: '0.8rem', flex: 1 }}>
+                                                Start Chat
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
+                {withdrawnProposalCount > 0 && (
+                    <p style={{ textAlign: 'center', margin: '1rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        {withdrawnProposalCount} proposal{withdrawnProposalCount === 1 ? '' : 's'} withdrawn
+                    </p>
+                )}
+            </div>
+        );
+    };
+
     return (
         <div style={S.page}>
 
@@ -1624,7 +2065,7 @@ export default function Earn() {
 
                 {/* 1. MAIN CATEGORY GRID — 2x2 cards, not a pill row
                     (design-references/Mobile/Earn-tab.png) */}
-                {!viewingJob && !viewingGigDetail && !viewingGigStatus && !selectedGig && (
+                {!viewingJob && !viewingGigDetail && !viewingGigStatus && !selectedGig && !viewingGigProposals && (
                     <div className="earn-category-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
                         {[
                             { id: 'jobs', icon: '💼', iconBg: 'var(--bg-mint)', title: 'Jobs', desc: 'Find freelance & full-time jobs' },
@@ -1794,6 +2235,8 @@ export default function Earn() {
                     <div>
                         {selectedGig ? (
                             <SendProposalView gig={selectedGig} onBack={() => setSelectedGig(null)} />
+                        ) : viewingGigProposals ? (
+                            <GigProposalsView gig={viewingGigProposals} onBack={() => { setViewingGigProposals(null); setExpandedProposalId(null); }} />
                         ) : viewingGigStatus ? (
                             <GigStatusView
                                 gig={viewingGigStatus}
@@ -1852,47 +2295,10 @@ export default function Earn() {
                                     </div>
                                 </div>
 
-                                {/* My Gig Works specific view */}
+                                {/* My Gig Works entry point now renders the full A4 My Proposals
+                                    view (four computed tabs) instead of the old plain card grid. */}
                                 {gigScope === 'my-gig-works' ? (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                        {loadingMyGigWorks ? (
-                                            <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '4rem 2rem' }}>Loading your gig applications...</div>
-                                        ) : myGigWorks.length === 0 ? (
-                                            <div style={{ textAlign: 'center', padding: '4rem 2rem', background: 'var(--bg-surface)', border: '1px dashed var(--border-color)', borderRadius: 16 }}>
-                                                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📋</div>
-                                                <h3 style={{ margin: '0 0 0.5rem', fontWeight: 800 }}>No applications yet</h3>
-                                                <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.9rem' }}>You haven't submitted proposals for any gigs.</p>
-                                            </div>
-                                        ) : (
-                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
-                                                {myGigWorks.map(application => (
-                                                    <div key={application.id} style={{ ...S.card, gap: '0.75rem' }}>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'flex-start' }}>
-                                                            <div>
-                                                                <h4 style={{ margin: 0, fontWeight: 800, fontSize: '0.95rem', lineHeight: 1.35 }}>{application.gigTitle}</h4>
-                                                                <p style={{ margin: '0.25rem 0 0', fontSize: '0.76rem', color: 'var(--text-muted)' }}>by {application.posterName}</p>
-                                                            </div>
-                                                            <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '0.25rem 0.55rem', borderRadius: 999, background: application.status === 'completed' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)', color: application.status === 'completed' ? 'var(--peacock-green)' : 'var(--accent-gold)', border: `1px solid ${application.status === 'completed' ? 'rgba(16,185,129,0.25)' : 'rgba(245,158,11,0.25)'}` }}>
-                                                                {application.status === 'completed' ? 'Completed' : application.status === 'rejected' ? 'Rejected' : application.status === 'in_progress' ? 'In Progress' : 'Applied'}
-                                                            </span>
-                                                        </div>
-                                                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                                                            <div>Applied on {new Date(application.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
-                                                        </div>
-                                                        {['applied', 'in_progress'].includes(application.status) ? (
-                                                            <button onClick={() => handleCompleteGigApplication(application)} disabled={completingGigAppId === application.id} className="btn-primary" style={{ width: '100%', padding: '0.6rem', borderRadius: 8, fontSize: '0.8rem' }}>
-                                                                {completingGigAppId === application.id ? <ButtonSpinner label="Completing..." /> : 'Completed ✓'}
-                                                            </button>
-                                                        ) : application.status === 'completed' ? (
-                                                            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--peacock-green)', textAlign: 'center', padding: '0.55rem', borderRadius: 8, background: 'var(--bg-mint)', border: '1px solid var(--border-mint)' }}>Completed ✓</div>
-                                                        ) : (
-                                                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>No action available</div>
-                                                        )}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
+                                    <MyProposalsView />
                                 ) : (
                                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
                                         {loadingGigs ? (
@@ -2213,66 +2619,6 @@ export default function Earn() {
                                 </div>
                             </div>
                         )}
-                    </div>
-                </div>
-            )}
-
-            {/* Proposal Modals... */}
-            {proposalsOpen && (
-                <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.15)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '1rem' }}>
-                    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 12, width: 680, maxWidth: '100%', padding: '1rem', boxShadow: 'var(--shadow-lg)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                            <div>
-                                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 900 }}>Gig Proposals</h3>
-                                <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>Applicants from gig_applications</p>
-                            </div>
-                            <button onClick={() => { setProposalsOpen(false); setCurrentProposals([]); }} style={{ background: 'none', border: 'none', fontSize: '1.1rem', cursor: 'pointer' }}>✕</button>
-                        </div>
-                        <div style={{ maxHeight: '60vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                            {loadingProposals ? (
-                                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading proposals...</div>
-                            ) : currentProposals.length === 0 ? (
-                                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>No proposals yet.</div>
-                            ) : (
-                                currentProposals.map(proposal => {
-                                    const applicantName = proposal.profiles?.full_name || proposal.profiles?.username || 'Anonymous';
-                                    const avatarUrl = proposal.profiles?.avatar_url;
-                                    const initials = applicantName.split(' ').slice(0, 2).map(part => part[0] || '').join('').toUpperCase() || '?';
-
-                                    return (
-                                        <div key={proposal.id} style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: '0.8rem', background: 'var(--bg-elevated)' }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
-                                                    {avatarUrl ? (
-                                                        <img src={avatarUrl} alt={applicantName} style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover' }} />
-                                                    ) : (
-                                                        <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--bg-mint)', color: 'var(--peacock-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9rem' }}>
-                                                            {initials}
-                                                        </div>
-                                                    )}
-                                                    <div style={{ minWidth: 0 }}>
-                                                        <div style={{ fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{applicantName}</div>
-                                                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{new Date(proposal.created_at).toLocaleString()}</div>
-                                                    </div>
-                                                </div>
-                                                {proposal.status === 'applied' ? (
-                                                    <button onClick={() => handleDiscuss(proposal.id, proposal.conversation_id)} disabled={!proposal.conversation_id} className="btn-primary" style={{ padding: '0.5rem 0.8rem', borderRadius: 8, fontSize: '0.78rem', flexShrink: 0 }}>
-                                                        Discuss
-                                                    </button>
-                                                ) : (
-                                                    <button onClick={() => navigate(`/messages?id=${proposal.conversation_id}`)} disabled={!proposal.conversation_id} className="btn-primary" style={{ padding: '0.5rem 0.8rem', borderRadius: 8, fontSize: '0.78rem', flexShrink: 0 }}>
-                                                        Message
-                                                    </button>
-                                                )}
-                                            </div>
-                                            <div style={{ marginTop: '0.6rem', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                                                {proposal.pitch}
-                                            </div>
-                                        </div>
-                                    );
-                                })
-                            )}
-                        </div>
                     </div>
                 </div>
             )}
