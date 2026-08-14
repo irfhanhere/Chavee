@@ -1,15 +1,17 @@
 import React from 'react';
 import { ConversationListSkeleton } from './SkeletonLoaders.jsx';
 
-export default function ConversationList({ 
-    conversations = [], 
-    loading = false, 
-    activeId = null, 
-    onSelect, 
-    searchQuery = '', 
+export default function ConversationList({
+    conversations = [],
+    loading = false,
+    activeId = null,
+    onSelect,
+    searchQuery = '',
     onSearchChange,
-    activeTab = 'All', // 'All', 'Connect', 'Request'
+    activeTab = 'All', // 'All', 'Connect', 'Request' — connection-status filter, scoped to the Chats room tab
     onTabChange,
+    roomTab = 'Chats', // 'Chats', 'Gig Rooms' — independent axis: conversations.type
+    onRoomTabChange,
     onlineUsers = new Set()
 }) {
     if (loading) return <ConversationListSkeleton />;
@@ -52,14 +54,26 @@ export default function ConversationList({
         return new Date(dateStr).toLocaleDateString([], { month: 'short', day: 'numeric' });
     };
 
+    const gigRoomCount = conversations.filter(c => c.type === 'gig_room').length;
+    const chatsCount = conversations.length - gigRoomCount;
+
     const filteredConversations = conversations.filter(c => {
+        // Room tab is the primary split: Gig Rooms are business threads (created automatically
+        // off a gig application) and aren't gated by the social connection system at all, so the
+        // Connect/Request filter below only makes sense inside the Chats tab.
+        const isGigRoom = c.type === 'gig_room';
+        if (roomTab === 'Gig Rooms' && !isGigRoom) return false;
+        if (roomTab === 'Chats' && isGigRoom) return false;
+
         const q = searchQuery.toLowerCase();
         const matchesSearch = !q || (c.peer.full_name || c.peer.username || '').toLowerCase().includes(q);
         if (!matchesSearch) return false;
 
-        if (activeTab === 'Connect') return c.isConnection;
-        if (activeTab === 'Request') return !c.isConnection;
-        return true; // 'All'
+        if (roomTab === 'Chats') {
+            if (activeTab === 'Connect') return c.isConnection;
+            if (activeTab === 'Request') return !c.isConnection;
+        }
+        return true; // 'All', or any Gig Rooms row
     });
 
     return (
@@ -76,21 +90,42 @@ export default function ConversationList({
 
             {/* Tabs & Search */}
             <div className="px-4 py-3 border-b border-gray-200 flex flex-col gap-3 shrink-0">
-                <div className="flex gap-2">
-                    {['All', 'Connect', 'Request'].map(tab => (
-                        <button 
-                            key={tab} 
-                            onClick={() => onTabChange(tab)}
-                            className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${
-                                activeTab === tab 
-                                ? 'bg-[#059669] text-white' 
-                                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                <div className="flex gap-1 p-1 bg-gray-100 rounded-xl">
+                    {['Chats', 'Gig Rooms'].map(tab => (
+                        <button
+                            key={tab}
+                            onClick={() => onRoomTabChange(tab)}
+                            className={`flex-1 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-1.5 ${
+                                roomTab === tab
+                                ? 'bg-white text-[#059669] shadow-sm'
+                                : 'text-gray-500 hover:text-gray-700'
                             }`}
                         >
+                            {tab === 'Gig Rooms' && <span aria-hidden="true">💼</span>}
                             {tab}
+                            <span className={`text-xs font-semibold ${roomTab === tab ? 'text-emerald-600' : 'text-gray-400'}`}>
+                                {tab === 'Gig Rooms' ? gigRoomCount : chatsCount}
+                            </span>
                         </button>
                     ))}
                 </div>
+                {roomTab === 'Chats' && (
+                    <div className="flex gap-2">
+                        {['All', 'Connect', 'Request'].map(tab => (
+                            <button
+                                key={tab}
+                                onClick={() => onTabChange(tab)}
+                                className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${
+                                    activeTab === tab
+                                    ? 'bg-[#059669] text-white'
+                                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                }`}
+                            >
+                                {tab}
+                            </button>
+                        ))}
+                    </div>
+                )}
                 <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -114,7 +149,9 @@ export default function ConversationList({
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
-                        <p className="text-sm font-medium">No conversations found.</p>
+                        <p className="text-sm font-medium">
+                            {roomTab === 'Gig Rooms' ? 'No gig rooms yet.' : 'No conversations found.'}
+                        </p>
                     </div>
                 ) : (
                     filteredConversations.map(c => {
@@ -138,8 +175,16 @@ export default function ConversationList({
                                 </div>
                                 <div className="flex-1 min-w-0 border-b border-transparent">
                                     <div className="flex justify-between items-center mb-1">
-                                        <span className="text-[1.05rem] font-semibold text-gray-900 truncate">
-                                            {c.peer.full_name || c.peer.username || 'Chavee Peer'}
+                                        <span className="text-[1.05rem] font-semibold text-gray-900 truncate flex items-center gap-1.5">
+                                            {c.type === 'gig_room' && (
+                                                <span
+                                                    className="shrink-0 text-[0.65rem] font-bold bg-amber-100 text-amber-700 px-1.5 py-[1px] rounded-full"
+                                                    title="Gig Room"
+                                                >
+                                                    💼 Gig
+                                                </span>
+                                            )}
+                                            <span className="truncate">{c.peer.full_name || c.peer.username || 'Chavee Peer'}</span>
                                         </span>
                                         <span className={`text-xs whitespace-nowrap ${hasUnread ? 'text-[#059669] font-bold' : 'text-gray-400 font-medium'}`}>
                                             {c.lastMsg ? getRelativeTime(c.lastMsg.created_at) : ''}
