@@ -586,27 +586,10 @@ export default function Messages() {
 
             showToast('Work approved! 🎉', 'success');
             loadGigContext();
-
-            // Fire-and-forget: check whether the seller's unsettled earnings now cross the
-            // early-release threshold, and request early settlement if so. This must never
-            // block or interfere with the approval the user already saw succeed above —
-            // any failure here is logged only, not surfaced to the user.
-            (async () => {
-                try {
-                    const { data: sessionData } = await supabase.auth.getSession();
-                    const accessToken = sessionData?.session?.access_token;
-                    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-                    await fetch(`${supabaseUrl}/functions/v1/cashfree-release-settlement`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${accessToken}`,
-                        },
-                    });
-                } catch (releaseErr) {
-                    console.error('Settlement release check failed (non-blocking):', releaseErr);
-                }
-            })();
+            // Used to fire-and-forget a call to cashfree-release-settlement here to
+            // request early Easy Split settlement. That function is deleted — Easy
+            // Split and Payouts are both confirmed unavailable on our Individual
+            // Cashfree account, so there is nothing to release early anymore.
         } catch (err) {
             console.error('Error approving work:', err);
             showToast('Action failed', 'error');
