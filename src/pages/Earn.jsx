@@ -13,6 +13,30 @@ const CATEGORIES = ['All', 'Textbooks', 'Notes', 'Services', 'Gigs', 'Digital'];
 const GIG_CATEGORIES = ['All', 'Graphic Design', 'Development', 'Writing', 'Marketing', 'Video Editing', 'Photography', 'Voice Over', 'Translation', 'AI', 'Tutoring', 'Business', 'Other'];
 const JOB_SUB_TABS = ['All Jobs', 'Internships', 'Part-Time', 'Full-Time', 'Remote', 'Campus Placement', 'Government'];
 
+const GIG_DESCRIPTION_MIN_LENGTH = 30;
+
+// Buyer-facing copy for gigs.rejection_reason — exact wording supplied by
+// product, do not reword. Keyed by the enum values written by the admin
+// moderation queue (Step 5).
+const REJECTION_REASON_COPY = {
+    academic_dishonesty: "This gig appears to be asking for help with academic work in a way that could be considered dishonest — like writing assignments or sitting exams on someone's behalf. We can't allow this on Chavee.",
+    illegal_or_prohibited: "This request involves something outside what's allowed on Chavee. If this was flagged in error, edit your listing with more context and resubmit.",
+    scope_unclear: "The scope of work in your description is unclear. Freelancers may not understand exactly what you need or what the expected outcome looks like.",
+    suspected_scam: "This gig has some red flags that suggest it might not be genuine work. If it's real, try adding more specific details about the deliverables and budget.",
+    off_platform_contact: "Your description asks people to contact you outside Chavee. For everyone's safety, all communication and payment should stay on the platform.",
+    inappropriate_content: "This gig contains content that isn't appropriate for Chavee's community. Please review our guidelines and resubmit.",
+    duplicate_posting: "This looks like a duplicate of a gig you've already posted. If it's genuinely different, make that clearer in the description.",
+};
+
+const gigTimeAgo = (date) => {
+    if (!date) return '';
+    const diff = (new Date() - new Date(date)) / 1000;
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)} minute${Math.floor(diff / 60) === 1 ? '' : 's'} ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} hour${Math.floor(diff / 3600) === 1 ? '' : 's'} ago`;
+    return `${Math.floor(diff / 86400)} day${Math.floor(diff / 86400) === 1 ? '' : 's'} ago`;
+};
+
 const S = {
     page: { minHeight: '100vh', background: 'var(--bg-base)', color: 'var(--text-primary)' },
     card: { 
@@ -106,6 +130,12 @@ export default function Earn() {
     // Detailed Views
     const [viewingJob, setViewingJob] = useState(null);
     const [viewingGigDetail, setViewingGigDetail] = useState(null);
+    const [viewingGigStatus, setViewingGigStatus] = useState(null);
+
+    // Set when the post-gig form is opened via "Edit & Resubmit" from the
+    // Gig Status screen — handlePostGigSubmit branches to an UPDATE instead
+    // of an INSERT when this is set, and clears rejection_reason/note.
+    const [editingGigId, setEditingGigId] = useState(null);
 
     // Search & filters
     const [search, setSearch]             = useState('');
@@ -229,7 +259,7 @@ export default function Earn() {
         }
     };
 
-    const loadGigs = async () => {
+    const loadGigs = async (currentUserId) => {
         setLoadingGigs(true);
         try {
             const { data, error } = await supabase
@@ -244,7 +274,32 @@ export default function Earn() {
                 .or('admin_hidden.is.null,admin_hidden.eq.false')
                 .order('created_at', { ascending: false });
             if (error) throw error;
-            if (data) setGigsList(data);
+            let combined = data || [];
+
+            // Pre-existing gap, not introduced by Phase 1b: the public feed
+            // query above only ever returns verified gigs, so a poster's own
+            // pending_review/rejected gigs never reached gigsList at all —
+            // "My Listings" silently couldn't show them. A poster must always
+            // be able to see everything they've posted regardless of
+            // moderation state, so this adds their own gigs unconditionally.
+            // This does NOT change what anyone else sees in the public feed
+            // (that's Step 4's job) — only what the signed-in poster sees of
+            // their own listings.
+            if (currentUserId) {
+                const { data: ownGigs, error: ownErr } = await supabase
+                    .from('gigs')
+                    .select('*')
+                    .eq('posted_by', currentUserId)
+                    .order('created_at', { ascending: false });
+                if (ownErr) {
+                    console.error('Error fetching own gigs:', ownErr);
+                } else if (ownGigs) {
+                    const seen = new Set(combined.map(g => g.id));
+                    combined = [...combined, ...ownGigs.filter(g => !seen.has(g.id))];
+                }
+            }
+
+            setGigsList(combined);
         } catch (err) {
             console.error('Error fetching gigs:', err);
         } finally {
@@ -304,9 +359,12 @@ export default function Earn() {
                         setTotalEarned(sum);
                     });
             }
+            // Called only after we know whether there's a session, so the
+            // own-gigs merge in loadGigs has the right id on first load
+            // instead of racing this promise.
+            loadGigs(session?.user?.id);
         });
         loadJobs();
-        loadGigs();
     }, []);
 
     useEffect(() => {
@@ -363,25 +421,53 @@ export default function Earn() {
     // Extended Gigs Filtering
     const displayedGigs = gigsList.filter(g => {
         if (gigScope === 'my-listings') {
+            // Everything the user has posted, any status — that's the point
+            // of "My Listings". Needs Attention / All Gigs below are the
+            // narrower, purpose-specific views.
             return user && g.posted_by === user.id;
         }
-        
+
+        if (gigScope === 'needs-attention') {
+            return user && g.posted_by === user.id && (g.status === 'pending_review' || g.status === 'rejected');
+        }
+
+        // 'all' — the public feed. Explicitly requires verified === true
+        // here, not just "whatever loadGigs happened to fetch" — loadGigs
+        // also merges in the signed-in user's own gigs (any status) so
+        // My Listings/Needs Attention can show them, and this filter is
+        // what keeps those out of the public feed, even for the poster
+        // viewing their own gig list. A pending/rejected gig must never
+        // show here, badged or not.
+        if (!g.verified) return false;
+
         // Search
-        const matchSearch = search === '' || 
-            (g.title && g.title.toLowerCase().includes(search.toLowerCase())) || 
-            (g.category && g.category.toLowerCase().includes(search.toLowerCase())) || 
+        const matchSearch = search === '' ||
+            (g.title && g.title.toLowerCase().includes(search.toLowerCase())) ||
+            (g.category && g.category.toLowerCase().includes(search.toLowerCase())) ||
             (g.description && g.description.toLowerCase().includes(search.toLowerCase()));
 
         // Advanced Filters
         const matchCat = gigAdvancedFilters.category === 'All' || (g.category && g.category.toLowerCase().includes(gigAdvancedFilters.category.toLowerCase()));
-        
+
         // (Other advanced gig filters would go here if we had the data - we'll treat them as matching all for now since data is missing)
         return matchSearch && matchCat;
     });
 
+    const needsAttentionCount = gigsList.filter(g => user && g.posted_by === user.id && (g.status === 'pending_review' || g.status === 'rejected')).length;
+
     const handlePostGigSubmit = async (e) => {
         e.preventDefault();
         if (!user) { navigate('/login'); return; }
+
+        // Defense in depth alongside the disabled submit button — the live
+        // counter in the JSX below already blocks submission under 30 chars,
+        // this just guards direct form submission (e.g. Enter key).
+        const trimmedDesc = gigForm.desc?.trim() || '';
+        if (trimmedDesc.length < GIG_DESCRIPTION_MIN_LENGTH) {
+            showToast(`Description must be at least ${GIG_DESCRIPTION_MIN_LENGTH} characters.`, 'error');
+            return;
+        }
+
         setPostingGig(true);
 
         // "Skills Required" still feeds the legacy free-text `category` column
@@ -390,8 +476,13 @@ export default function Earn() {
         // new FK column the admin panel actually reads; gig_categories has 0
         // rows right now, so this will be null until real categories exist —
         // flagged to the user, not seeded here.
+        //
+        // status is now 'pending_review', not 'Live' — Phase 1b gig posting
+        // moderation. Every new gig sits in the queue until an admin approves
+        // or rejects it (see admin moderation queue). This does NOT touch any
+        // of the 12 gigs that existed before this change.
         const budgetValue = Number(gigForm.budget) || 1000;
-        const payload = {
+        const basePayload = {
             title: gigForm.title?.trim(),
             client_name: gigForm.client?.trim() || user.email.split('@')[0],
             location: 'Remote',
@@ -401,11 +492,35 @@ export default function Earn() {
             condition: (gigForm.deadline || '7') + ' Days',
             category: gigForm.skills?.trim() || 'General',
             category_id: gigForm.categoryId || null,
-            description: gigForm.desc?.trim(),
-            status: 'Live',
-            verified: false, // starts as unverified, needs admin approval!
-            posted_by: user.id
+            description: trimmedDesc,
         };
+
+        // Edit & Resubmit (Gig Status screen, rejected gigs only): UPDATE the
+        // existing row instead of inserting a new one — puts it back in the
+        // review queue and clears the rejection so it reads as a fresh
+        // submission, without re-awarding XP for what's still the same gig.
+        if (editingGigId) {
+            const { error: updateError } = await supabase
+                .from('gigs')
+                .update({ ...basePayload, status: 'pending_review', rejection_reason: null, rejection_note: null })
+                .eq('id', editingGigId);
+
+            if (updateError) {
+                showToast('Failed to resubmit gig: ' + updateError.message, 'error');
+                setPostingGig(false);
+                return;
+            }
+
+            setGigForm({ title: '', client: '', budget: '', deadline: '', skills: '', desc: '', categoryId: '' });
+            setEditingGigId(null);
+            setPostingGig(false);
+            setActiveMainTab('gigs');
+            showToast('🎉 Gig resubmitted for review!', 'success');
+            loadGigs(user.id);
+            return;
+        }
+
+        const payload = { ...basePayload, status: 'pending_review', verified: false, posted_by: user.id };
 
         const { data, error } = await supabase
             .from('gigs')
@@ -437,8 +552,8 @@ export default function Earn() {
         setGigForm({ title: '', client: '', budget: '', deadline: '', skills: '', desc: '', categoryId: '' });
         setPostingGig(false);
         setActiveMainTab('gigs');
-        showToast('🎉 Freelance gig posted successfully! +50 XP & Gig Pioneer badge!', 'success');
-        loadGigs();
+        showToast('🎉 Gig submitted for review! +50 XP & Gig Pioneer badge!', 'success');
+        loadGigs(user.id);
     };
 
     const handleOpenApplyGig = (gig) => {
@@ -467,6 +582,7 @@ export default function Earn() {
             setGigsList(prev => prev.filter(item => item.id !== gig.id));
             setMyListings(prev => prev.filter(item => item.id !== gig.id));
             if (viewingGigDetail?.id === gig.id) setViewingGigDetail(null);
+            if (viewingGigStatus?.id === gig.id) setViewingGigStatus(null);
             showToast('🗑️ Gig deleted.', 'success');
         } catch (err) {
             console.error('Error deleting gig:', err);
@@ -474,6 +590,26 @@ export default function Earn() {
         } finally {
             setDeletingGigId(null);
         }
+    };
+
+    // Pre-fills the post-gig form from a rejected gig and switches the form
+    // into "edit" mode — handlePostGigSubmit branches on editingGigId to do
+    // an UPDATE (status back to pending_review, rejection fields cleared)
+    // instead of an INSERT.
+    const handleEditResubmit = (gig) => {
+        const days = parseInt(gig.condition, 10);
+        setGigForm({
+            title: gig.title || '',
+            client: gig.client_name || '',
+            budget: String(gig.budget_min || gig.price || ''),
+            deadline: days ? String(days) : '',
+            skills: gig.category || '',
+            desc: gig.description || '',
+            categoryId: gig.category_id || '',
+        });
+        setEditingGigId(gig.id);
+        setViewingGigStatus(null);
+        setActiveMainTab('post-gig');
     };
 
     const loadProposalCountsForOwnedGigs = async (gigIds) => {
@@ -535,7 +671,7 @@ export default function Earn() {
             const { error } = await supabase.from('gigs').update({ status: 'filled' }).eq('id', gig.id);
             if (error) throw error;
             showToast('Gig marked as filled.', 'success');
-            loadGigs();
+            loadGigs(user.id);
             loadMyGigWorks(user.id).catch(() => {});
         } catch (err) {
             console.error('Failed to mark filled:', err);
@@ -957,6 +1093,206 @@ export default function Earn() {
         );
     };
 
+    // A7 — Gig Status screen. Shown when the poster opens one of their own
+    // gigs while it's pending_review or rejected (design-references/gig-screens/
+    // 7-gig-status-mobile.png.png, A7-gig-status-web.png.png).
+    //
+    // Data gaps vs. the mockup, flagged rather than fabricated:
+    // - No image/thumbnail column on gigs — using the same ⚡ icon box
+    //   GigDetailView already uses instead of a fake image.
+    // - No attachments column/table on gigs — Attachments row shows "No
+    //   attachments" rather than the mockup's invented "brand-inspiration.pdf".
+    // - No updated_at column — the desktop Overview panel omits "Last
+    //   Updated" rather than reusing created_at dishonestly.
+    // - "Needed By" isn't a stored date — condition stores "N Days" as
+    //   free text, so this is created_at + N days, a real derived value.
+    // - "Gig ID: GIG-XXXXX" — gigs use UUID ids, not this short format;
+    //   using the first 5 hex chars of the real id as a display-only label.
+    // - "Gig Type: Standard Gig" — there's only one gig type in the schema
+    //   today, so this is accurate static text, not fabricated data.
+    const GigStatusView = ({ gig, onBack, onEditResubmit, onDelete }) => {
+        const [proposalsCount, setProposalsCount] = useState(0);
+
+        useEffect(() => {
+            let cancelled = false;
+            supabase.from('gig_applications').select('id', { count: 'exact', head: true }).eq('gig_id', gig.id)
+                .then(({ count }) => { if (!cancelled) setProposalsCount(count || 0); });
+            return () => { cancelled = true; };
+        }, [gig.id]);
+
+        const isPending = gig.status === 'pending_review';
+        const isRejected = gig.status === 'rejected';
+        const categoryName = gigCategories.find(c => c.id === gig.category_id)?.name || 'Uncategorized';
+        const shortGigId = `GIG-${gig.id.slice(0, 5).toUpperCase()}`;
+        const hasBudgetRange = gig.budget_min || gig.budget_max;
+        const budgetLabel = hasBudgetRange
+            ? `₹${Number(gig.budget_min || gig.price || 0).toLocaleString('en-IN')} - ₹${Number(gig.budget_max || gig.price || 0).toLocaleString('en-IN')}`
+            : 'Negotiable';
+        const neededByLabel = (() => {
+            const days = parseInt(gig.condition, 10);
+            if (!days || !gig.created_at) return '—';
+            const d = new Date(gig.created_at);
+            d.setDate(d.getDate() + days);
+            return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+        })();
+        const rejectionCopy = gig.rejection_reason
+            ? (REJECTION_REASON_COPY[gig.rejection_reason] || 'No specific reason was recorded for this rejection.')
+            : null;
+
+        const detailRows = (
+            <>
+                <div className="gig-status-field"><span>📂</span><div><strong>Category</strong><div className="gig-status-field-value"><span className="gig-status-category-chip">{categoryName}</span></div></div></div>
+                <div className="gig-status-field"><span>🛡️</span><div><strong>Budget Range</strong><div className="gig-status-field-value">{budgetLabel}</div></div></div>
+                <div className="gig-status-field"><span>📅</span><div><strong>Needed By</strong><div className="gig-status-field-value">{neededByLabel}</div></div></div>
+                <div className="gig-status-field"><span>👥</span><div><strong>Proposals</strong><div className="gig-status-field-value">{proposalsCount}</div></div></div>
+            </>
+        );
+
+        return (
+            <div style={{ animation: 'fadeInUp 0.3s ease-out' }}>
+                <button onClick={onBack} className="btn-ghost" style={{ padding: '0.5rem 1rem', borderRadius: 8, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    ← Back to My Gigs
+                </button>
+
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span onClick={onBack} style={{ color: 'var(--peacock-green)', fontWeight: 700, cursor: 'pointer' }}>Earn</span>
+                    <span>›</span>
+                    <span style={{ color: 'var(--peacock-green)', fontWeight: 700 }}>Gig</span>
+                    <span>›</span>
+                    <span onClick={onBack} style={{ color: 'var(--peacock-green)', fontWeight: 700, cursor: 'pointer' }}>My Gigs</span>
+                    <span>›</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{gig.title}</span>
+                </div>
+
+                <h1 style={{ margin: '0 0 0.35rem 0', fontSize: '1.5rem', fontWeight: 900 }}>{gig.title}</h1>
+                <p style={{ margin: '0 0 1.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Gig ID: {shortGigId} · Posted {gigTimeAgo(gig.created_at)}
+                </p>
+
+                {isPending && (
+                    <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 14, padding: '1.1rem 1.25rem', marginBottom: '1.25rem', display: 'flex', gap: '0.9rem' }}>
+                        <span style={{ fontSize: '1.6rem', flexShrink: 0 }}>⏳</span>
+                        <div>
+                            <div style={{ fontWeight: 800, color: '#B45309', fontSize: '1rem', marginBottom: '0.2rem' }}>Under Review</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.6rem' }}>
+                                Submitted {gigTimeAgo(gig.created_at)} · usually live within 2 hours
+                            </div>
+                            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                Thanks! We're reviewing your gig to make sure it meets our guidelines.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {isRejected && (
+                    <div style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 14, padding: '1.1rem 1.25rem', marginBottom: '1.25rem', display: 'flex', gap: '0.9rem' }}>
+                        <span style={{ fontSize: '1.6rem', flexShrink: 0 }}>⊗</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 800, color: '#DC2626', fontSize: '1rem', marginBottom: '0.3rem' }}>Rejected</div>
+                            <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                We couldn't approve your gig this time. Don't worry — this is common and easy to fix.
+                            </p>
+                            <div className="gig-status-reject-grid">
+                                <div>
+                                    <div style={{ fontWeight: 700, fontSize: '0.82rem', marginBottom: '0.3rem' }}>Reason for rejection</div>
+                                    <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{rejectionCopy}</p>
+                                </div>
+                                {gig.rejection_note && (
+                                    <div>
+                                        <div style={{ fontWeight: 700, fontSize: '0.82rem', marginBottom: '0.3rem' }}>Admin note</div>
+                                        <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{gig.rejection_note}</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                <div className="gig-status-actions" style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                    <button
+                        onClick={() => isRejected && onEditResubmit(gig)}
+                        disabled={!isRejected}
+                        style={{
+                            flex: '1 1 160px', padding: '0.65rem 1rem', borderRadius: 10, fontSize: '0.85rem', fontWeight: 700,
+                            background: 'transparent', border: `1px solid ${isRejected ? 'var(--peacock-green)' : 'var(--border-color)'}`,
+                            color: isRejected ? 'var(--peacock-green)' : 'var(--text-muted)',
+                            cursor: isRejected ? 'pointer' : 'not-allowed', opacity: isRejected ? 1 : 0.55
+                        }}
+                        title={isRejected ? '' : 'Only available for rejected gigs'}
+                    >
+                        ✏️ Edit & Resubmit
+                    </button>
+                    <button
+                        onClick={() => onDelete(gig)}
+                        style={{ flex: '1 1 160px', padding: '0.65rem 1rem', borderRadius: 10, fontSize: '0.85rem', fontWeight: 700, background: 'transparent', border: '1px solid var(--accent-coral)', color: 'var(--accent-coral)', cursor: 'pointer' }}
+                    >
+                        🗑️ Delete Gig
+                    </button>
+                    <Link
+                        to="/contact-us"
+                        style={{ flex: '1 1 160px', padding: '0.65rem 1rem', borderRadius: 10, fontSize: '0.85rem', fontWeight: 700, background: 'transparent', border: '1px solid #3B82F6', color: '#3B82F6', textAlign: 'center', textDecoration: 'none' }}
+                    >
+                        🎧 Contact Support
+                    </Link>
+                </div>
+
+                <div className="gig-status-grid">
+                    <div className="gig-status-details" style={S.card}>
+                        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800 }}>Gig Details</h3>
+                        <div className="gig-status-details-inner">
+                            <div style={{ fontSize: '2.2rem', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', borderRadius: 14, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                ⚡
+                            </div>
+                            <div className="gig-status-fields">
+                                {detailRows}
+                            </div>
+                        </div>
+                        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.85rem', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.83rem', color: 'var(--text-secondary)' }}>
+                            <span>📎</span>
+                            <span style={{ fontWeight: 700 }}>Attachments</span>
+                            <span style={{ marginLeft: 'auto', color: 'var(--text-muted)' }}>No attachments</span>
+                        </div>
+
+                        <div className="gig-status-description">
+                            <h4 style={{ margin: '0.5rem 0 0.5rem', fontSize: '0.9rem', fontWeight: 800 }}>Description</h4>
+                            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{gig.description}</p>
+                        </div>
+                    </div>
+
+                    <div className="gig-status-sidebar" style={S.card}>
+                        <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>Overview</h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.82rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Status</span><span style={{ fontWeight: 700, color: isRejected ? '#DC2626' : '#B45309' }}>{isRejected ? 'Rejected' : 'Under Review'}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Posted</span><span style={{ fontWeight: 700 }}>{new Date(gig.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Gig Type</span><span style={{ fontWeight: 700 }}>Standard Gig</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style={{ marginTop: '1.5rem', background: 'var(--bg-mint)', border: '1px solid var(--border-mint)', borderRadius: 14, padding: '1.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                        <span style={{ fontSize: '1.3rem' }}>💡</span>
+                        <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: 'var(--peacock-green)' }}>Tips to get your gig approved</h4>
+                    </div>
+                    <div className="gig-status-tips-grid">
+                        {[
+                            'Be clear and specific about what you need',
+                            'Add details about deliverables, file formats, and preferences',
+                            'Mention any examples or references (if available)',
+                            'Set a realistic budget range',
+                            'Add a deadline that gives freelancers enough time',
+                        ].map(tip => (
+                            <div key={tip} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.83rem', color: 'var(--text-secondary)' }}>
+                                <span style={{ color: 'var(--peacock-green)', flexShrink: 0 }}>✓</span>
+                                <span>{tip}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div style={S.page}>
 
@@ -985,7 +1321,7 @@ export default function Earn() {
 
                 {/* 1. MAIN CATEGORY GRID — 2x2 cards, not a pill row
                     (design-references/Mobile/Earn-tab.png) */}
-                {!viewingJob && !viewingGigDetail && (
+                {!viewingJob && !viewingGigDetail && !viewingGigStatus && (
                     <div className="earn-category-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
                         {[
                             { id: 'jobs', icon: '💼', iconBg: 'var(--bg-mint)', title: 'Jobs', desc: 'Find freelance & full-time jobs' },
@@ -1153,7 +1489,14 @@ export default function Earn() {
                 {/* ── GIG WORK TAB ── */}
                 {activeMainTab === 'gigs' && (
                     <div>
-                        {viewingGigDetail ? (
+                        {viewingGigStatus ? (
+                            <GigStatusView
+                                gig={viewingGigStatus}
+                                onBack={() => setViewingGigStatus(null)}
+                                onEditResubmit={handleEditResubmit}
+                                onDelete={handleDeleteGig}
+                            />
+                        ) : viewingGigDetail ? (
                             <GigDetailView gig={viewingGigDetail} onBack={() => setViewingGigDetail(null)} />
                         ) : (
                             <>
@@ -1185,6 +1528,21 @@ export default function Earn() {
                                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                                         <button onClick={() => setGigScope('all')} style={{ padding: '0.5rem 1rem', borderRadius: 10, background: gigScope === 'all' ? 'var(--peacock-green)' : 'var(--bg-surface)', color: gigScope === 'all' ? '#fff' : 'var(--text-secondary)', border: '1px solid', borderColor: gigScope === 'all' ? 'var(--peacock-green)' : 'var(--border-color)', fontSize: '0.8rem', fontWeight: 600 }}>All Gigs</button>
                                         <button onClick={() => setGigScope('my-listings')} style={{ padding: '0.5rem 1rem', borderRadius: 10, background: gigScope === 'my-listings' ? 'var(--peacock-green)' : 'var(--bg-surface)', color: gigScope === 'my-listings' ? '#fff' : 'var(--text-secondary)', border: '1px solid', borderColor: gigScope === 'my-listings' ? 'var(--peacock-green)' : 'var(--border-color)', fontSize: '0.8rem', fontWeight: 600 }}>My Listings</button>
+                                        <button
+                                            onClick={() => setGigScope('needs-attention')}
+                                            style={{ padding: '0.5rem 1rem', borderRadius: 10, display: 'flex', alignItems: 'center', gap: '0.4rem', background: gigScope === 'needs-attention' ? 'var(--peacock-green)' : 'var(--bg-surface)', color: gigScope === 'needs-attention' ? '#fff' : 'var(--text-secondary)', border: '1px solid', borderColor: gigScope === 'needs-attention' ? 'var(--peacock-green)' : 'var(--border-color)', fontSize: '0.8rem', fontWeight: 600 }}
+                                        >
+                                            Needs Attention
+                                            {needsAttentionCount > 0 && (
+                                                <span style={{
+                                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, borderRadius: 9, padding: '0 0.3rem', fontSize: '0.68rem', fontWeight: 800,
+                                                    background: gigScope === 'needs-attention' ? 'rgba(255,255,255,0.25)' : 'rgba(245,158,11,0.15)',
+                                                    color: gigScope === 'needs-attention' ? '#fff' : '#B45309'
+                                                }}>
+                                                    {needsAttentionCount}
+                                                </span>
+                                            )}
+                                        </button>
                                         <button onClick={() => setGigScope('my-gig-works')} style={{ padding: '0.5rem 1rem', borderRadius: 10, background: gigScope === 'my-gig-works' ? 'var(--peacock-green)' : 'var(--bg-surface)', color: gigScope === 'my-gig-works' ? '#fff' : 'var(--text-secondary)', border: '1px solid', borderColor: gigScope === 'my-gig-works' ? 'var(--peacock-green)' : 'var(--border-color)', fontSize: '0.8rem', fontWeight: 600 }}>My Gig Works</button>
                                     </div>
                                 </div>
@@ -1239,30 +1597,43 @@ export default function Earn() {
                                             </div>
                                         ) : displayedGigs.length === 0 ? (
                                             <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '4rem 2rem', background: 'var(--bg-surface)', border: '1px dashed var(--border-color)', borderRadius: 16 }}>
-                                                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⚡</div>
-                                                <h3 style={{ margin: '0 0 0.5rem', fontWeight: 800 }}>No gigs found</h3>
-                                                <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.9rem' }}>Be the first to post a gig in this category!</p>
+                                                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>{gigScope === 'needs-attention' ? '✅' : '⚡'}</div>
+                                                <h3 style={{ margin: '0 0 0.5rem', fontWeight: 800 }}>{gigScope === 'needs-attention' ? "You're all caught up" : 'No gigs found'}</h3>
+                                                <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.9rem' }}>
+                                                    {gigScope === 'needs-attention' ? 'Nothing pending review or needing changes right now.' : 'Be the first to post a gig in this category!'}
+                                                </p>
                                             </div>
                                         ) : (
                                             displayedGigs.map(gig => {
                                                 const budgetVal = gig.price ? Number(gig.price) : 1000;
-                                                const isPending = !gig.verified;
+                                                const isRejected = gig.status === 'rejected';
+                                                const isPending = !gig.verified && !isRejected;
                                                 const isOwnGig = Boolean(user && gig.posted_by === user.id);
-                                                
+                                                const accentColor = isRejected ? 'var(--accent-coral)' : isPending ? 'var(--accent-gold)' : 'var(--peacock-green)';
+
                                                 return (
-                                                    <div id={`gig-card-${gig.id}`} key={gig.id} 
-                                                        style={{ 
+                                                    <div id={`gig-card-${gig.id}`} key={gig.id}
+                                                        style={{
                                                             ...S.card, cursor: 'pointer',
-                                                            borderLeft: `4px solid ${isPending ? 'var(--accent-gold)' : 'var(--peacock-green)'}`,
-                                                            background: isPending ? 'rgba(245,158,11,0.03)' : 'var(--bg-surface)'
+                                                            borderLeft: `4px solid ${accentColor}`,
+                                                            background: isRejected ? 'rgba(239,68,68,0.03)' : isPending ? 'rgba(245,158,11,0.03)' : 'var(--bg-surface)'
                                                         }}
-                                                        onClick={() => setViewingGigDetail(gig)}
+                                                        onClick={() => {
+                                                            // A gig's poster viewing their own pending_review/rejected
+                                                            // gig gets the Gig Status screen (A7), not the public
+                                                            // GigDetailView — that view assumes a live, applyable gig.
+                                                            if (isOwnGig && (gig.status === 'pending_review' || gig.status === 'rejected')) {
+                                                                setViewingGigStatus(gig);
+                                                            } else {
+                                                                setViewingGigDetail(gig);
+                                                            }
+                                                        }}
                                                     >
                                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                                 <span style={{ fontSize: '1.75rem' }}>⚡</span>
                                                             </div>
-                                                            <span style={{ fontSize: '1.15rem', fontWeight: 900, color: isPending ? 'var(--accent-gold)' : 'var(--peacock-green)' }}>
+                                                            <span style={{ fontSize: '1.15rem', fontWeight: 900, color: accentColor }}>
                                                                 ₹{budgetVal.toLocaleString('en-IN')}
                                                             </span>
                                                         </div>
@@ -1286,9 +1657,19 @@ export default function Earn() {
 
                                                         {isOwnGig ? (
                                                             <div style={{ marginTop: '0.5rem' }}>
-                                                                <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '0.3rem 0.6rem', borderRadius: 8, background: gig.verified ? 'var(--bg-mint)' : 'rgba(245,158,11,0.1)', color: gig.verified ? 'var(--peacock-green)' : 'var(--accent-gold)' }}>
-                                                                    {gig.verified ? '🟢 Your Live Listing' : '🟡 Pending Admin Approval'}
-                                                                </span>
+                                                                {gig.status === 'rejected' ? (
+                                                                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '0.3rem 0.6rem', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: 'var(--accent-coral)' }}>
+                                                                        🔴 Rejected — Needs Your Attention
+                                                                    </span>
+                                                                ) : gig.status === 'pending_review' ? (
+                                                                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '0.3rem 0.6rem', borderRadius: 8, background: 'rgba(245,158,11,0.1)', color: 'var(--accent-gold)' }}>
+                                                                        🟡 Pending Admin Approval
+                                                                    </span>
+                                                                ) : (
+                                                                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '0.3rem 0.6rem', borderRadius: 8, background: 'var(--bg-mint)', color: 'var(--peacock-green)' }}>
+                                                                        🟢 Your Live Listing
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                         ) : (
                                                             <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
@@ -1378,9 +1759,11 @@ export default function Earn() {
                     <div style={{ maxWidth: 620, margin: '0 auto' }}>
                         <div style={{ ...S.card, padding: '2rem', gap: '1.5rem' }}>
                             <div>
-                                <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>Post a Freelance Gig</h2>
+                                <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>{editingGigId ? 'Edit Your Gig' : 'Post a Freelance Gig'}</h2>
                                 <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.25rem 0 0 0' }}>
-                                    Outsource simple tasks, tech development, or design work to campus peers. Get it done fast. +50 XP!
+                                    {editingGigId
+                                        ? "Update your listing based on the admin's feedback, then resubmit for review."
+                                        : 'Outsource simple tasks, tech development, or design work to campus peers. Get it done fast. +50 XP!'}
                                 </p>
                             </div>
                             
@@ -1428,11 +1811,19 @@ export default function Earn() {
                                 <div>
                                     <label style={S.label}>Gig Description & Scope</label>
                                     <textarea rows={4} value={gigForm.desc} onChange={e => setGigForm({...gigForm, desc: e.target.value})} placeholder="Describe the deliverables in detail. What skills should the student have?" style={{ ...S.input, resize: 'vertical', fontFamily: 'inherit' }} required />
+                                    <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', fontWeight: 600, color: gigForm.desc.trim().length >= GIG_DESCRIPTION_MIN_LENGTH ? 'var(--peacock-green)' : 'var(--text-muted)' }}>
+                                        {gigForm.desc.trim().length} / {GIG_DESCRIPTION_MIN_LENGTH} characters minimum
+                                        {gigForm.desc.trim().length >= GIG_DESCRIPTION_MIN_LENGTH ? ' ✓' : ''}
+                                    </div>
+                                </div>
+                                <div style={{ padding: '0.75rem 1rem', borderRadius: 10, background: 'rgba(17,94,89,0.06)', border: '1px solid rgba(17,94,89,0.15)', fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                                    <span>⏳</span>
+                                    <span>All gigs are reviewed before going live — usually within 2 hours.</span>
                                 </div>
                                 <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
-                                    <button type="button" onClick={() => setActiveMainTab('gigs')} className="btn-ghost" style={{ padding: '0.75rem 1.5rem', borderRadius: 10 }}>Cancel</button>
-                                    <button type="submit" disabled={postingGig} className="btn-primary" style={{ flex: 1, padding: '0.75rem', borderRadius: 10 }}>
-                                        {postingGig ? <ButtonSpinner label="Publishing..." /> : 'Post Gig Listing ⚡'}
+                                    <button type="button" onClick={() => { setEditingGigId(null); setGigForm({ title: '', client: '', budget: '', deadline: '', skills: '', desc: '', categoryId: '' }); setActiveMainTab('gigs'); }} className="btn-ghost" style={{ padding: '0.75rem 1.5rem', borderRadius: 10 }}>Cancel</button>
+                                    <button type="submit" disabled={postingGig || gigForm.desc.trim().length < GIG_DESCRIPTION_MIN_LENGTH} className="btn-primary" style={{ flex: 1, padding: '0.75rem', borderRadius: 10, opacity: (postingGig || gigForm.desc.trim().length < GIG_DESCRIPTION_MIN_LENGTH) ? 0.6 : 1, cursor: (postingGig || gigForm.desc.trim().length < GIG_DESCRIPTION_MIN_LENGTH) ? 'not-allowed' : 'pointer' }}>
+                                        {postingGig ? <ButtonSpinner label="Submitting..." /> : (editingGigId ? 'Resubmit for Review' : 'Submit for Review')}
                                     </button>
                                 </div>
                             </form>

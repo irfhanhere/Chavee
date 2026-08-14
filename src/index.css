@@ -252,6 +252,10 @@ body {
 }
 @media (max-width: 1024px) {
   .hidden-tablet { display: none !important; }
+  /* Home tab: Upcoming Event banner / Announcements / Messages preview —
+     shown only where the desktop right-sidebar widgets (.hidden-tablet)
+     that carry the same data are hidden, so it's never shown twice. */
+  .mobile-home-widgets { display: flex !important; }
 }
 
 /* ── Mobile typography scale ── */
@@ -417,6 +421,47 @@ body {
     padding: 1rem !important;
     border-radius: 12px !important;
   }
+
+  /* ── Profile header (Profile.jsx) — matches Profile-Tab.png: no cover
+     photo, compact avatar+name row, Edit Profile pinned top-right, stats
+     swipeable in one row instead of wrapping into a 2x2 grid. ── */
+  .profile-page-container { padding: 1rem !important; }
+  .profile-cover-banner { display: none !important; }
+  .profile-header-body {
+    margin-top: 0 !important;
+    padding: 1rem !important;
+    gap: 0.85rem !important;
+    position: relative;
+  }
+  .profile-avatar-wrap img,
+  .profile-avatar-wrap > div {
+    width: 64px !important;
+    height: 64px !important;
+    font-size: 1.5rem !important;
+  }
+  .profile-info-col { min-width: 0 !important; }
+  .profile-name { font-size: 1.3rem !important; }
+  /* Reserve space on the right so the name/handle never runs under the
+     absolutely-positioned Edit Profile button below. */
+  .profile-name, .profile-handle { max-width: calc(100% - 90px); }
+  .profile-stats-row {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    padding-bottom: 0.15rem;
+  }
+  /* Taken out of normal flow so Edit Profile (absolute, top-right) and
+     Profile Complete (flows after the stats row) can be positioned
+     independently, regardless of where they sit in the DOM. */
+  .profile-actions-col { display: contents !important; }
+  .profile-edit-btn {
+    position: absolute !important;
+    top: 0.85rem;
+    right: 1rem;
+    padding: 0.4rem 0.75rem !important;
+    font-size: 0.76rem !important;
+    z-index: 2;
+  }
+  .profile-completion { max-width: none !important; order: 5; margin-top: 0.25rem; }
 }
 
 @media (max-width: 480px) {
@@ -442,4 +487,98 @@ body {
   border-radius: 16px;
   padding: 1.25rem;
   box-shadow: var(--shadow-sm);
+}
+
+/* ══════════════════════════════════════
+   GIG STATUS SCREEN (A7)
+   Mobile-first: single column by default,
+   becomes a two-column layout (details + sidebar)
+   above 768px, matching the Step 1 web/mobile pattern.
+   ══════════════════════════════════════ */
+.gig-status-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+.gig-status-details,
+.gig-status-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.gig-status-sidebar {
+  /* !important needed: the div also carries the S.card inline style
+     (display: 'flex'), which otherwise beats this stylesheet rule
+     regardless of source order or specificity. */
+  display: none !important;
+}
+.gig-status-details-inner {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+.gig-status-fields {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem 1rem;
+}
+.gig-status-field {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  font-size: 0.85rem;
+}
+.gig-status-field strong {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 0.15rem;
+}
+.gig-status-field-value {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+.gig-status-category-chip {
+  display: inline-block;
+  background: rgba(139,92,246,0.12);
+  color: #8B5CF6;
+  padding: 0.15rem 0.6rem;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.gig-status-reject-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.85rem;
+}
+.gig-status-tips-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+
+@media (min-width: 769px) {
+  .gig-status-grid {
+    grid-template-columns: 2.3fr 1fr;
+  }
+  .gig-status-sidebar {
+    display: flex !important;
+  }
+  .gig-status-details-inner {
+    align-items: flex-start;
+  }
+  .gig-status-reject-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .gig-status-tips-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
