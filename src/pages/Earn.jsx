@@ -100,6 +100,8 @@ export default function Earn() {
     
     // Main Tabs: jobs | gigs | marketplace | post-gig
     const [activeMainTab, setActiveMainTab] = useState('jobs');
+    const [totalEarned, setTotalEarned] = useState(0);
+    const [showJobFilters, setShowJobFilters] = useState(false);
     
     // Detailed Views
     const [viewingJob, setViewingJob] = useState(null);
@@ -153,7 +155,18 @@ export default function Earn() {
     const [appSuccess, setAppSuccess] = useState(false);
 
     // Post Gig form state
-    const [gigForm, setGigForm] = useState({ title: '', client: '', budget: '', deadline: '', skills: '', desc: '' });
+    const [gigForm, setGigForm] = useState({ title: '', client: '', budget: '', deadline: '', skills: '', desc: '', categoryId: '' });
+    const [gigCategories, setGigCategories] = useState([]);
+
+    // gig_categories is empty right now (0 rows) — this still loads it live
+    // so the picker below starts working the moment real categories exist,
+    // with no further code change needed.
+    useEffect(() => {
+        supabase.from('gig_categories').select('id, name').order('name').then(({ data, error }) => {
+            if (error) { console.error('Failed to load gig categories:', error); return; }
+            setGigCategories(data || []);
+        });
+    }, []);
 
     // Content reporting states
     const [reportingItem, setReportingItem] = useState(null);
@@ -280,6 +293,16 @@ export default function Earn() {
                 const g = localStorage.getItem(`gamification_${session.user.id}`);
                 if (g) setGamification(JSON.parse(g));
                 loadMyGigWorks(session.user.id);
+
+                // "Your Earnings" card — same real source/query Earnings.jsx uses
+                // (gig_contracts.seller_net_amount, approved contracts only).
+                supabase.from('gig_contracts').select('seller_net_amount')
+                    .eq('seller_id', session.user.id)
+                    .eq('status', 'approved')
+                    .then(({ data }) => {
+                        const sum = (data || []).reduce((s, c) => s + (Number(c.seller_net_amount) || 0), 0);
+                        setTotalEarned(sum);
+                    });
             }
         });
         loadJobs();
@@ -361,13 +384,23 @@ export default function Earn() {
         if (!user) { navigate('/login'); return; }
         setPostingGig(true);
 
+        // "Skills Required" still feeds the legacy free-text `category` column
+        // unchanged — that's what the public gig-card chips (Earn.jsx list view)
+        // read, and this fix isn't touching that display. category_id is the
+        // new FK column the admin panel actually reads; gig_categories has 0
+        // rows right now, so this will be null until real categories exist —
+        // flagged to the user, not seeded here.
+        const budgetValue = Number(gigForm.budget) || 1000;
         const payload = {
             title: gigForm.title?.trim(),
             client_name: gigForm.client?.trim() || user.email.split('@')[0],
             location: 'Remote',
-            price: Number(gigForm.budget) || 1000,
+            price: budgetValue,
+            budget_min: budgetValue,
+            budget_max: budgetValue,
             condition: (gigForm.deadline || '7') + ' Days',
             category: gigForm.skills?.trim() || 'General',
+            category_id: gigForm.categoryId || null,
             description: gigForm.desc?.trim(),
             status: 'Live',
             verified: false, // starts as unverified, needs admin approval!
@@ -401,7 +434,7 @@ export default function Earn() {
             console.error('Failed to award gig XP:', rpcErr);
         }
 
-        setGigForm({ title: '', client: '', budget: '', deadline: '', skills: '', desc: '' });
+        setGigForm({ title: '', client: '', budget: '', deadline: '', skills: '', desc: '', categoryId: '' });
         setPostingGig(false);
         setActiveMainTab('gigs');
         showToast('🎉 Freelance gig posted successfully! +50 XP & Gig Pioneer badge!', 'success');
@@ -927,36 +960,61 @@ export default function Earn() {
     return (
         <div style={S.page}>
 
-            {/* Hero */}
-            <div style={{ background: 'linear-gradient(135deg, rgba(17,94,89,0.04), rgba(217,119,6,0.02))', borderBottom: '1px solid var(--border-color)', padding: '3.5rem 2rem' }}>
-                <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1.5rem' }}>
-                    <div>
-                        <p style={{ color: 'var(--peacock-green)', fontWeight: 700, fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>💸 Earn</p>
-                        <h1 style={{ fontSize: 'clamp(1.8rem, 4vw, 2.8rem)', fontWeight: 900, margin: '0 0 0.75rem 0' }}>
-                            Earn Money <span className="gradient-text">Through Freelance & Gigs</span>
-                        </h1>
-                        <p style={{ color: 'var(--text-secondary)', maxWidth: 560, lineHeight: 1.6, margin: 0 }}>
-                            Post your skills, take freelance gig work, or trade textbook resources with peers.
+            {/* Header row — plain title + subtext left, real "Your Earnings" card
+                pinned top-right (design-references/Mobile/Earn-tab.png). No hero
+                banner here — that treatment isn't in the reference. */}
+            <div style={{ maxWidth: 1200, margin: '0 auto', padding: '2rem 2rem 0' }}>
+                <div className="earn-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'nowrap', marginBottom: '1.5rem' }}>
+                    <div style={{ minWidth: 0, flex: '1 1 0%' }}>
+                        <h1 style={{ fontSize: 'clamp(1.6rem, 4vw, 2.2rem)', fontWeight: 900, margin: '0 0 0.35rem 0' }}>Earn</h1>
+                        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0, fontSize: '0.9rem' }}>
+                            Find jobs, gigs and opportunities that match your skills.
                         </p>
                     </div>
-                    {activeMainTab === 'gigs' && !viewingGigDetail && (
-                        <button onClick={() => { if (!user) { navigate('/login'); return; } setActiveMainTab('post-gig'); }}
-                            className="btn-primary" style={{ padding: '0.8rem 1.75rem', fontSize: '0.92rem', borderRadius: 12 }}>
-                            + Post a Gig
-                        </button>
-                    )}
+                    <Link to="/earnings" style={{ textDecoration: 'none', flexShrink: 0, background: 'var(--bg-mint)', border: '1px solid var(--border-mint)', borderRadius: 14, padding: '0.6rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <div>
+                            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--peacock-green)' }}>Your Earnings</div>
+                            <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--peacock-green)' }}>₹{totalEarned.toLocaleString('en-IN')}</div>
+                        </div>
+                        <span style={{ color: 'var(--peacock-green)', fontSize: '1.1rem' }}>›</span>
+                    </Link>
                 </div>
             </div>
 
-            <div style={{ maxWidth: 1200, margin: '0 auto', padding: '3rem 2rem' }}>
-                
-                {/* 1. MAIN TAB SWITCHER */}
+            <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 2rem 3rem' }}>
+
+                {/* 1. MAIN CATEGORY GRID — 2x2 cards, not a pill row
+                    (design-references/Mobile/Earn-tab.png) */}
                 {!viewingJob && !viewingGigDetail && (
-                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
-                        <button style={S.tabBtn(activeMainTab === 'jobs')} onClick={() => { setActiveMainTab('jobs'); setSearch(''); }}>💼 Jobs & Placements</button>
-                        <button style={S.tabBtn(activeMainTab === 'gigs')} onClick={() => { setActiveMainTab('gigs'); setSearch(''); }}>⚡ Gig Work</button>
-                        <button style={S.tabBtn(activeMainTab === 'marketplace')} onClick={() => { setActiveMainTab('marketplace'); setSearch(''); }}>🛒 Student Marketplace</button>
-                        <button style={S.tabBtn(activeMainTab === 'challenges')} onClick={() => { setActiveMainTab('challenges'); setSearch(''); }}>🏆 Challenges</button>
+                    <div className="earn-category-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+                        {[
+                            { id: 'jobs', icon: '💼', iconBg: 'var(--bg-mint)', title: 'Jobs', desc: 'Find freelance & full-time jobs' },
+                            { id: 'gigs', icon: '⚡', iconBg: 'rgba(217,119,6,0.12)', title: 'Gigs', desc: 'Offer your skills & get hired' },
+                            { id: 'marketplace', icon: '🛒', iconBg: 'rgba(99,102,241,0.12)', title: 'Student Marketplace', desc: 'Buy & sell books, notes & more' },
+                            { id: 'challenges', icon: '🏆', iconBg: 'rgba(217,119,6,0.12)', title: 'Challenges', desc: 'Participate & win exciting rewards' },
+                        ].map(cat => (
+                            <button
+                                key={cat.id}
+                                onClick={() => { setActiveMainTab(cat.id); setSearch(''); }}
+                                style={{
+                                    textAlign: 'left',
+                                    background: 'var(--bg-surface)',
+                                    border: activeMainTab === cat.id ? '2px solid var(--peacock-green)' : '1px solid var(--border-color)',
+                                    borderBottom: activeMainTab === cat.id ? '4px solid var(--peacock-green)' : '1px solid var(--border-color)',
+                                    borderRadius: 14,
+                                    padding: '1rem 0.85rem',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '0.5rem',
+                                    transition: 'all 0.15s',
+                                }}
+                            >
+                                <span style={{ width: 40, height: 40, borderRadius: '50%', background: cat.iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.15rem' }}>{cat.icon}</span>
+                                <span style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>{cat.title}</span>
+                                <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.35 }}>{cat.desc}</span>
+                            </button>
+                        ))}
                     </div>
                 )}
 
@@ -967,33 +1025,86 @@ export default function Earn() {
                             <JobDetailView job={viewingJob} onBack={() => setViewingJob(null)} />
                         ) : (
                             <>
-                                {/* Sub-Nav & Search */}
-                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
-                                    {JOB_SUB_TABS.map(tab => (
-                                        <button key={tab} style={S.chip(jobFilter === tab)} onClick={() => setJobFilter(tab)}>{tab}</button>
-                                    ))}
-                                </div>
-                                
-                                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem', alignItems: 'flex-end' }}>
-                                    <div style={{ flex: '1 1 300px' }}>
-                                        <input 
-                                            type="text" value={search} onChange={e => setSearch(e.target.value)} 
-                                            placeholder="🔍 Search job title, company, skills, or location..." 
-                                            style={S.input} 
+                                {/* Search + filter toggle — reference shows a search bar with a
+                                    separate filter icon button, not the sub-tab chips and dropdowns
+                                    expanded by default. Those now live behind the filter icon. */}
+                                <div style={{ display: 'flex', gap: '0.75rem', marginBottom: showJobFilters ? '1rem' : '2rem' }}>
+                                    <div style={{ flex: 1 }}>
+                                        <input
+                                            type="text" value={search} onChange={e => setSearch(e.target.value)}
+                                            placeholder="🔍 Search jobs, gigs, skills or companies..."
+                                            style={S.input}
                                         />
                                     </div>
-                                    <FilterSelect label="Experience" value={jobAdvancedFilters.experience} onChange={v => setJobAdvancedFilters(p => ({...p, experience: v}))} options={['All', 'Entry Level', '1-2 Years', '3+ Years']} />
-                                    <FilterSelect label="Salary" value={jobAdvancedFilters.salary} onChange={v => setJobAdvancedFilters(p => ({...p, salary: v}))} options={['All', 'Paid', 'Unpaid/Equity']} />
-                                    <FilterSelect label="Category" value={jobAdvancedFilters.category} onChange={v => setJobAdvancedFilters(p => ({...p, category: v}))} options={['All', 'Engineering', 'Design', 'Marketing', 'Sales', 'Product', 'Other']} />
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.5rem' }}>
-                                        <input type="checkbox" checked={jobAdvancedFilters.remote} onChange={e => setJobAdvancedFilters(p => ({...p, remote: e.target.checked}))} />
-                                        Remote Only
-                                    </label>
+                                    <button
+                                        onClick={() => setShowJobFilters(v => !v)}
+                                        aria-label="Filters"
+                                        style={{ flexShrink: 0, width: 44, height: 44, borderRadius: 10, border: '1px solid var(--border-color)', background: showJobFilters ? 'var(--bg-mint)' : 'var(--bg-surface)', color: 'var(--peacock-green)', fontSize: '1.1rem', cursor: 'pointer' }}
+                                    >
+                                        ⚙️
+                                    </button>
+                                </div>
+
+                                {showJobFilters && (
+                                    <div style={{ ...S.card, marginBottom: '2rem', gap: '1.25rem' }}>
+                                        <div>
+                                            <label style={S.label}>Type</label>
+                                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                {JOB_SUB_TABS.map(tab => (
+                                                    <button key={tab} style={S.chip(jobFilter === tab)} onClick={() => setJobFilter(tab)}>{tab}</button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                                            <FilterSelect label="Experience" value={jobAdvancedFilters.experience} onChange={v => setJobAdvancedFilters(p => ({...p, experience: v}))} options={['All', 'Entry Level', '1-2 Years', '3+ Years']} />
+                                            <FilterSelect label="Salary" value={jobAdvancedFilters.salary} onChange={v => setJobAdvancedFilters(p => ({...p, salary: v}))} options={['All', 'Paid', 'Unpaid/Equity']} />
+                                            <FilterSelect label="Category" value={jobAdvancedFilters.category} onChange={v => setJobAdvancedFilters(p => ({...p, category: v}))} options={['All', 'Engineering', 'Design', 'Marketing', 'Sales', 'Product', 'Other']} />
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.5rem' }}>
+                                                <input type="checkbox" checked={jobAdvancedFilters.remote} onChange={e => setJobAdvancedFilters(p => ({...p, remote: e.target.checked}))} />
+                                                Remote Only
+                                            </label>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Recommended for you — real "featured" jobs (jobs.featured),
+                                    same data source the grid below uses, just surfaced first. */}
+                                {!loadingJobs && displayedJobs.some(j => j.featured) && (
+                                    <div style={{ marginBottom: '2rem' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                            <h2 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0 }}>Recommended for you</h2>
+                                        </div>
+                                        {(() => {
+                                            const job = displayedJobs.find(j => j.featured);
+                                            return (
+                                                <div style={{ ...S.card, cursor: 'pointer', border: '1px solid var(--border-mint)', background: 'var(--bg-mint)' }} onClick={() => setViewingJob(job)}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                                        <span style={{ fontSize: '0.65rem', fontWeight: 800, background: 'rgba(217,119,6,0.15)', color: 'var(--accent-gold)', padding: '0.2rem 0.55rem', borderRadius: 20 }}>🔥 Hot</span>
+                                                        <SaveButton itemType="job" itemId={job.id} user={user} style={{ padding: '0.4rem', borderRadius: 8, border: 'none', background: 'transparent' }} />
+                                                    </div>
+                                                    <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>{job.title}</h3>
+                                                    <p style={{ fontSize: '0.8rem', color: 'var(--peacock-green)', fontWeight: 700, margin: 0 }}>{job.company} · {job.location || 'Remote'}</p>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                                                        <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--peacock-green)' }}>💰 {job.compensation || 'Negotiable'}</span>
+                                                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{job.created_at ? new Date(job.created_at).toLocaleDateString() : 'Recent'}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
+                                )}
+
+                                {/* Latest Opportunities */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                    <div>
+                                        <h2 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0 }}>Latest Opportunities</h2>
+                                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>{displayedJobs.length} job{displayedJobs.length === 1 ? '' : 's'} found</p>
+                                    </div>
                                 </div>
 
                                 {/* Grid */}
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem' }}>
-                                    
+
                                     {loadingJobs ? (
                                         <div style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'var(--text-secondary)', padding: '4rem 2rem' }}>
                                             <div className="spinner" style={{ margin: '0 auto 1rem', width: 30, height: 30, border: '3px solid var(--peacock-green)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
@@ -1007,39 +1118,28 @@ export default function Earn() {
                                         </div>
                                     ) : (
                                         displayedJobs.map(job => (
-                                            <div key={job.id} style={{ ...S.card, cursor: 'pointer' }} onClick={() => setViewingJob(job)}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                    <span style={{ fontSize: '2.5rem', background: 'var(--bg-elevated)', borderRadius: 12, padding: '0.2rem', width: 50, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <div key={job.id} style={{ ...S.card, cursor: 'pointer', padding: '1.1rem', gap: '0.5rem' }} onClick={() => setViewingJob(job)}>
+                                                <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+                                                    <span style={{ fontSize: '1.4rem', background: 'var(--bg-elevated)', borderRadius: 10, width: 42, height: 42, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                         {job.logo || '🏢'}
                                                     </span>
-                                                    <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                                        <span style={{ fontSize: '0.67rem', fontWeight: 800, background: 'var(--bg-mint)', color: 'var(--peacock-green)', border: '1px solid var(--border-mint)', padding: '0.2rem 0.6rem', borderRadius: 20 }}>
-                                                            {job.job_type || 'Full-Time'}
-                                                        </span>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <h3 style={{ fontSize: '0.98rem', fontWeight: 800, margin: '0 0 0.15rem 0', overflowWrap: 'anywhere' }}>{job.title}</h3>
+                                                        <p style={{ fontSize: '0.8rem', color: 'var(--peacock-green)', fontWeight: 700, margin: '0 0 0.4rem 0' }}>{job.company}</p>
+                                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                                                            <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', background: 'var(--bg-elevated)', padding: '0.2rem 0.55rem', borderRadius: 20, border: '1px solid var(--border-color)' }}>
+                                                                📍 {job.location || 'Remote'}
+                                                            </span>
+                                                            <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', background: 'var(--bg-elevated)', padding: '0.2rem 0.55rem', borderRadius: 20, border: '1px solid var(--border-color)' }}>
+                                                                💼 {job.job_type || 'Full-Time'}
+                                                            </span>
+                                                        </div>
                                                     </div>
+                                                    <SaveButton itemType="job" itemId={job.id} user={user} style={{ flexShrink: 0 }} />
                                                 </div>
-                                                <div>
-                                                    <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: '0 0 0.25rem 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{job.title}</h3>
-                                                    <p style={{ fontSize: '0.8rem', color: 'var(--peacock-green)', fontWeight: 700, margin: 0 }}>{job.company} · {job.location || 'Remote'}</p>
-                                                </div>
-                                                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                                                    {job.description}
-                                                </p>
-                                                
-                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>
-                                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', background: 'var(--bg-elevated)', padding: '0.2rem 0.5rem', borderRadius: 6, border: '1px solid var(--border-color)' }}>
-                                                        💰 {job.compensation || 'Negotiable'}
-                                                    </span>
-                                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', background: 'var(--bg-elevated)', padding: '0.2rem 0.5rem', borderRadius: 6, border: '1px solid var(--border-color)' }}>
-                                                        📅 {job.created_at ? new Date(job.created_at).toLocaleDateString() : 'Recent'}
-                                                    </span>
-                                                </div>
-
-                                                <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                                                    <SaveButton itemType="job" itemId={job.id} user={user} style={{ padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)' }} />
-                                                    <button onClick={(e) => { e.stopPropagation(); setViewingJob(job); }} className="btn-primary" style={{ flex: 1, padding: '0.6rem', borderRadius: 8, fontSize: '0.8rem' }}>
-                                                        View Details →
-                                                    </button>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 'calc(42px + 0.85rem)' }}>
+                                                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--peacock-green)' }}>{job.compensation || 'Negotiable'}</span>
+                                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{job.created_at ? new Date(job.created_at).toLocaleDateString() : 'Recent'}</span>
                                                 </div>
                                             </div>
                                         ))
@@ -1057,6 +1157,12 @@ export default function Earn() {
                             <GigDetailView gig={viewingGigDetail} onBack={() => setViewingGigDetail(null)} />
                         ) : (
                             <>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+                                    <button onClick={() => { if (!user) { navigate('/login'); return; } setActiveMainTab('post-gig'); }}
+                                        className="btn-primary" style={{ padding: '0.7rem 1.5rem', fontSize: '0.88rem', borderRadius: 10 }}>
+                                        + Post a Gig
+                                    </button>
+                                </div>
                                 {/* Categories */}
                                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
                                     {GIG_CATEGORIES.map(cat => (
@@ -1302,6 +1408,22 @@ export default function Earn() {
                                         <label style={S.label}>Skills Required (comma-separated)</label>
                                         <input type="text" value={gigForm.skills} onChange={e => setGigForm({...gigForm, skills: e.target.value})} placeholder="e.g. Figma, Canva" style={S.input} required />
                                     </div>
+                                </div>
+                                <div>
+                                    <label style={S.label}>Category</label>
+                                    <select
+                                        value={gigForm.categoryId}
+                                        onChange={e => setGigForm({...gigForm, categoryId: e.target.value})}
+                                        style={S.input}
+                                        disabled={gigCategories.length === 0}
+                                    >
+                                        <option value="">
+                                            {gigCategories.length === 0 ? 'No categories set up yet' : 'Select a category (optional)'}
+                                        </option>
+                                        {gigCategories.map(c => (
+                                            <option key={c.id} value={c.id}>{c.name}</option>
+                                        ))}
+                                    </select>
                                 </div>
                                 <div>
                                     <label style={S.label}>Gig Description & Scope</label>
