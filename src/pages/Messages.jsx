@@ -26,16 +26,17 @@ export default function Messages() {
     const [loadingConvs, setLoadingConvs] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [activeTab, setActiveTab] = useState('All');
+    const [roomTab, setRoomTab] = useState('Chats'); // 'Chats' | 'Gig Rooms' — independent of the Connect/Request filter above
 
     // Gig context
     const [gigContext, setGigContext] = useState(null);
     const [showCreateOffer, setShowCreateOffer] = useState(false);
-    const [offerForm, setOfferForm] = useState({ price: '', delivery_days: '', revisions: '', terms: '' });
+    const [offerForm, setOfferForm] = useState({ items: [{ description: '', price: '' }], delivery_days: '', revisions: '', terms: '' });
     const [submittingOffer, setSubmittingOffer] = useState(false);
 
     // Negotiate state
     const [showNegotiateForm, setShowNegotiateForm] = useState(false);
-    const [negotiateForm, setNegotiateForm] = useState({ price: '', terms: '' });
+    const [negotiateForm, setNegotiateForm] = useState({ checked: {}, terms: '' });
     const [submittingNegotiate, setSubmittingNegotiate] = useState(false);
 
     // Cashfree vendor onboarding
@@ -135,6 +136,13 @@ export default function Messages() {
                 .in('conversation_id', convIds);
             if (e2) throw e2;
 
+            const { data: convTypeRows, error: e2b } = await supabase
+                .from('conversations')
+                .select('id, type')
+                .in('id', convIds);
+            if (e2b) throw e2b;
+            const convTypeById = Object.fromEntries((convTypeRows || []).map(c => [c.id, c.type]));
+
             const userIds = [...new Set(allPartsRaw?.map(p => p.user_id) || [])];
             
             const { data: profiles, error: e3 } = await supabase
@@ -186,14 +194,15 @@ export default function Messages() {
                     (c.user_two === user.id && c.user_one === peerId)
                 ) : false;
 
-                return { 
-                    id: cid, 
-                    peer: peer || { id: 'unknown', full_name: 'Unknown User' }, 
-                    peerId, 
-                    lastMsg, 
-                    unread, 
+                return {
+                    id: cid,
+                    peer: peer || { id: 'unknown', full_name: 'Unknown User' },
+                    peerId,
+                    lastMsg,
+                    unread,
                     updatedAt: lastMsg ? new Date(lastMsg.created_at).getTime() : 0,
-                    isConnection
+                    isConnection,
+                    type: convTypeById[cid] || 'dm'
                 };
             }).sort((a, b) => b.updatedAt - a.updatedAt);
             
@@ -341,6 +350,20 @@ export default function Messages() {
 
             const activeOffer = latestPending || latestAccepted || null;
 
+            // 2b. Line items for the active offer (gig_offer_items). Legacy offers created
+            //     before line items existed have no rows here — the UI renders those as a
+            //     single synthetic "Service" line at offer.price instead of breaking.
+            let activeOfferItems = [];
+            if (activeOffer) {
+                const { data: itemsData, error: itemsErr } = await supabase
+                    .from('gig_offer_items')
+                    .select('*')
+                    .eq('gig_offer_id', activeOffer.id)
+                    .order('sort_order', { ascending: true });
+                if (itemsErr) console.error('Error loading offer line items:', itemsErr);
+                activeOfferItems = itemsData || [];
+            }
+
             // 3. If the active offer is accepted, look up its payment/work status so the
             //    UI can reflect whether the buyer has paid, and where the delivery stands.
             let contractPaymentStatus = null;
@@ -361,6 +384,7 @@ export default function Messages() {
                 isSeller,
                 isBuyer,
                 activeOffer,
+                activeOfferItems,
                 allOffers: allOffers || [],
                 chainDepth,
                 contractPaymentStatus,
@@ -419,26 +443,58 @@ export default function Messages() {
     const handleCreateOfferSubmit = async (e) => {
         e.preventDefault();
         if (!gigContext || !user) return;
+
+        // Line items are the source of truth for price — gig_offers.price is kept in sync
+        // as their computed sum (see note above the offer form) rather than typed directly.
+        const cleanItems = offerForm.items
+            .map(it => ({ description: it.description.trim(), price: Number(it.price) }))
+            .filter(it => it.description && it.price > 0);
+
+        if (cleanItems.length === 0) {
+            showToast('Add at least one line item with a description and price.', 'error');
+            return;
+        }
+
+        const computedPrice = cleanItems.reduce((sum, it) => sum + it.price, 0);
+
         setSubmittingOffer(true);
+        let newOfferId = null;
         try {
-            const { error } = await supabase.from('gig_offers').insert({
+            const { data: newOffer, error } = await supabase.from('gig_offers').insert({
                 gig_application_id: gigContext.application.id,
                 gig_id: gigContext.gig.id,
                 seller_id: user.id,
                 buyer_id: gigContext.gig.posted_by,
-                price: Number(offerForm.price),
+                price: computedPrice,
                 delivery_days: Number(offerForm.delivery_days),
                 revisions: Number(offerForm.revisions),
                 terms: offerForm.terms,
                 status: 'pending'
-            });
+            }).select().single();
             if (error) throw error;
+            newOfferId = newOffer.id;
+
+            const { error: itemsError } = await supabase.from('gig_offer_items').insert(
+                cleanItems.map((it, idx) => ({
+                    gig_offer_id: newOffer.id,
+                    description: it.description,
+                    price: it.price,
+                    sort_order: idx
+                }))
+            );
+            if (itemsError) throw itemsError;
+
             showToast('Offer created successfully!', 'success');
             setShowCreateOffer(false);
-            setOfferForm({ price: '', delivery_days: '', revisions: '', terms: '' });
+            setOfferForm({ items: [{ description: '', price: '' }], delivery_days: '', revisions: '', terms: '' });
             loadGigContext(); // Reload to show the pending offer
         } catch (err) {
             console.error('Error creating offer:', err);
+            // If the offer row was created but its line items failed to write, don't leave
+            // an orphaned offer behind — roll it back so the seller can just retry cleanly.
+            if (newOfferId) {
+                await supabase.from('gig_offers').delete().eq('id', newOfferId);
+            }
             showToast('Failed to create offer.', 'error');
         } finally {
             setSubmittingOffer(false);
@@ -493,6 +549,14 @@ export default function Messages() {
                 throw new Error(json?.error || json?.message || `Server error (${response.status})`);
             }
 
+            // Snapshot the line items being paid for, so the checkout summary can show them —
+            // same fallback as the Offer Card: real gig_offer_items, or a synthetic Service row
+            // for legacy offers.
+            const rawItems = gigContext?.activeOfferItems || [];
+            const lineItems = rawItems.length > 0
+                ? rawItems
+                : [{ id: 'synthetic', description: 'Service', price: json.amounts?.offer_price ?? 0 }];
+
             // Open payment modal with Cashfree Dropin
             setPaymentModal({
                 offerId,
@@ -500,6 +564,13 @@ export default function Messages() {
                 contractId: json.contract_id,
                 paymentSessionId: json.payment_session_id,
                 amounts: json.amounts,
+                lineItems,
+                // The env this order was actually created against — cashfree-create-order now
+                // echoes back its own CASHFREE_ENV so the Dropin SDK below never drifts from it.
+                // Falls back to 'sandbox' (never 'production') if an older deployed function
+                // hasn't been redeployed with this field yet — same fail-safe default the
+                // backend itself uses.
+                environment: json.environment === 'production' ? 'production' : 'sandbox',
                 phase: 'checkout',
             });
         } catch (err) {
@@ -615,7 +686,10 @@ export default function Messages() {
             setPaymentModal(null);
             return;
         }
-        const cashfree = window.Cashfree({ mode: 'sandbox' });
+        // Mode must match whatever CASHFREE_ENV the order was actually created under on the
+        // backend (threaded through via paymentModal.environment) — never hardcoded here, or
+        // the Dropin SDK can silently point at the wrong Cashfree environment.
+        const cashfree = window.Cashfree({ mode: paymentModal.environment === 'production' ? 'production' : 'sandbox' });
         cashfree.checkout({
             paymentSessionId: paymentModal.paymentSessionId,
             redirectTarget: '_modal',
@@ -690,7 +764,25 @@ export default function Messages() {
         if (!gigContext || !user) return;
         const offer = gigContext.activeOffer;
         if (!offer) return;
+
+        // Counter by unchecking items, never by typing a price. The checked-item source is the
+        // same displayItems logic used for the offer card: real gig_offer_items rows, or a single
+        // synthetic "Service" row (offer.price) for legacy offers that predate line items.
+        const rawItems = gigContext.activeOfferItems || [];
+        const sourceItems = rawItems.length > 0
+            ? rawItems
+            : [{ id: 'synthetic', description: 'Service', price: offer.price }];
+        const checkedItems = sourceItems.filter(it => negotiateForm.checked?.[it.id]);
+
+        if (checkedItems.length === 0) {
+            showToast('Keep at least one line item in the counter-offer.', 'error');
+            return;
+        }
+
+        const computedPrice = checkedItems.reduce((sum, it) => sum + Number(it.price), 0);
+
         setSubmittingNegotiate(true);
+        let newOfferId = null;
         try {
             // Determine who is negotiating and what direction the counter-offer goes
             const amBuyer = user.id === offer.buyer_id;
@@ -703,28 +795,44 @@ export default function Messages() {
                 .eq('id', offer.id);
             if (counterErr) throw counterErr;
 
-            // 2. INSERT the new counter-offer (never update the original)
-            const { error: insertErr } = await supabase.from('gig_offers').insert({
+            // 2. INSERT the new counter-offer (never update the original), price = sum of checked items
+            const { data: newOffer, error: insertErr } = await supabase.from('gig_offers').insert({
                 gig_application_id: offer.gig_application_id,
                 gig_id: offer.gig_id,
                 seller_id: offer.seller_id,
                 buyer_id: offer.buyer_id,
-                price: Number(negotiateForm.price),
+                price: computedPrice,
                 delivery_days: offer.delivery_days,
                 revisions: offer.revisions,
                 terms: negotiateForm.terms,
                 status: 'pending',
                 direction: newDirection,
                 parent_offer_id: offer.id
-            });
+            }).select().single();
             if (insertErr) throw insertErr;
+            newOfferId = newOffer.id;
+
+            // 3. Copy only the checked items into their own rows scoped to the new offer
+            const { error: itemsError } = await supabase.from('gig_offer_items').insert(
+                checkedItems.map((it, idx) => ({
+                    gig_offer_id: newOffer.id,
+                    description: it.description,
+                    price: it.price,
+                    sort_order: idx
+                }))
+            );
+            if (itemsError) throw itemsError;
 
             showToast('Counter-offer sent! ✉️', 'success');
             setShowNegotiateForm(false);
-            setNegotiateForm({ price: '', terms: '' });
+            setNegotiateForm({ checked: {}, terms: '' });
             loadGigContext();
         } catch (err) {
             console.error('Error submitting counter-offer:', err);
+            // Don't leave an orphaned counter-offer with no items if the items insert failed.
+            if (newOfferId) {
+                await supabase.from('gig_offers').delete().eq('id', newOfferId);
+            }
             showToast('Failed to send counter-offer.', 'error');
         } finally {
             setSubmittingNegotiate(false);
@@ -878,6 +986,8 @@ export default function Messages() {
                     onSearchChange={setSearchQuery}
                     activeTab={activeTab}
                     onTabChange={setActiveTab}
+                    roomTab={roomTab}
+                    onRoomTabChange={setRoomTab}
                     onlineUsers={onlineUsers}
                 />
             </div>
@@ -915,8 +1025,60 @@ export default function Messages() {
                             {showCreateOffer && gigContext.isSeller && !gigContext.activeOffer && (
                                 <form onSubmit={handleCreateOfferSubmit} style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: 8, border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
                                     <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-primary)' }}>Create Custom Offer</h4>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                        <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Line Items</label>
+                                        {offerForm.items.map((item, idx) => (
+                                            <div key={idx} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Description (e.g. Logo design)"
+                                                    required
+                                                    value={item.description}
+                                                    onChange={e => {
+                                                        const items = [...offerForm.items];
+                                                        items[idx] = { ...items[idx], description: e.target.value };
+                                                        setOfferForm({ ...offerForm, items });
+                                                    }}
+                                                    style={{ flex: 2, minWidth: 0, padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.8rem', background: 'var(--bg-base)' }}
+                                                />
+                                                <input
+                                                    type="number"
+                                                    placeholder="₹"
+                                                    required
+                                                    min="1"
+                                                    value={item.price}
+                                                    onChange={e => {
+                                                        const items = [...offerForm.items];
+                                                        items[idx] = { ...items[idx], price: e.target.value };
+                                                        setOfferForm({ ...offerForm, items });
+                                                    }}
+                                                    style={{ flex: 1, minWidth: 0, padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.8rem', background: 'var(--bg-base)' }}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setOfferForm({ ...offerForm, items: offerForm.items.filter((_, i) => i !== idx) })}
+                                                    disabled={offerForm.items.length <= 1}
+                                                    aria-label="Remove item"
+                                                    style={{ padding: '0.4rem 0.6rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'transparent', color: offerForm.items.length <= 1 ? 'var(--border-color)' : 'var(--text-muted)', cursor: offerForm.items.length <= 1 ? 'default' : 'pointer', fontSize: '0.8rem' }}
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+                                        ))}
+                                        <button
+                                            type="button"
+                                            onClick={() => setOfferForm({ ...offerForm, items: [...offerForm.items, { description: '', price: '' }] })}
+                                            style={{ alignSelf: 'flex-start', padding: '0.35rem 0.7rem', borderRadius: 6, border: '1px dashed var(--border-color)', background: 'transparent', color: 'var(--peacock-green)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700 }}
+                                        >
+                                            + Add item
+                                        </button>
+                                        <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-primary)', textAlign: 'right', borderTop: '1px dashed var(--border-color)', paddingTop: '0.3rem' }}>
+                                            Total: ₹{offerForm.items.reduce((sum, it) => sum + (Number(it.price) || 0), 0).toFixed(2)}
+                                        </div>
+                                    </div>
+
                                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem' }}>
-                                        <input type="number" placeholder="Price (₹)" required min="1" value={offerForm.price} onChange={e => setOfferForm({...offerForm, price: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.8rem', background: 'var(--bg-base)' }} />
                                         <input type="number" placeholder="Delivery (Days)" required min="1" value={offerForm.delivery_days} onChange={e => setOfferForm({...offerForm, delivery_days: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.8rem', background: 'var(--bg-base)' }} />
                                         <input type="number" placeholder="Revisions" required min="0" value={offerForm.revisions} onChange={e => setOfferForm({...offerForm, revisions: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.8rem', background: 'var(--bg-base)' }} />
                                     </div>
@@ -941,6 +1103,19 @@ export default function Messages() {
                                 const currentUserIsWaitingParty = !currentUserIsActingParty;
 
                                 const isPaid = gigContext.contractPaymentStatus === 'paid';
+
+                                // Line items: real gig_offer_items rows if present, otherwise a
+                                // single synthetic "Service" row for legacy pre-line-item offers.
+                                const rawItems = gigContext.activeOfferItems || [];
+                                const displayItems = rawItems.length > 0
+                                    ? rawItems
+                                    : [{ id: 'synthetic', description: 'Service', price: offer.price }];
+
+                                // Same buyer/seller commission formula as cashfree-create-order's
+                                // calculateAmounts() — kept in sync so this preview matches what
+                                // Pay Now will actually charge/pay out.
+                                const buyerBreakdown = Math.round(offer.price * 1.05 * 100) / 100;
+                                const sellerBreakdown = Math.round(offer.price * 0.98 * 100) / 100;
 
                                 // Derive a human-readable label for who sent this offer
                                 const offerFromLabel =
@@ -972,8 +1147,28 @@ export default function Messages() {
                                                 <div style={{ fontSize: '0.8rem', fontWeight: 700, color: isAccepted ? 'var(--peacock-green)' : 'var(--text-primary)', marginBottom: '0.2rem' }}>
                                                     {offerFromLabel}
                                                 </div>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', margin: '0.35rem 0' }}>
+                                                    {displayItems.map((item, idx) => (
+                                                        <div key={item.id || idx} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                                            <span>{item.description}</span>
+                                                            <span>₹{Number(item.price).toFixed(2)}</span>
+                                                        </div>
+                                                    ))}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-primary)', borderTop: '1px dashed var(--border-color)', paddingTop: '0.2rem', marginTop: '0.15rem' }}>
+                                                        <span>Subtotal</span>
+                                                        <span>₹{Number(offer.price).toFixed(2)}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                                                        <span>Buyer pays (+5% fee)</span>
+                                                        <span>₹{buyerBreakdown.toFixed(2)}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                                                        <span>Seller receives (−2% fee)</span>
+                                                        <span>₹{sellerBreakdown.toFixed(2)}</span>
+                                                    </div>
+                                                </div>
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                                    ₹{offer.price} • {offer.delivery_days} Days • {offer.revisions} Revisions
+                                                    {offer.delivery_days} Days • {offer.revisions} Revisions
                                                 </div>
                                                 {offer.terms && (
                                                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
@@ -1000,7 +1195,11 @@ export default function Messages() {
                                                         <button
                                                             onClick={() => {
                                                                 setShowNegotiateForm(v => !v);
-                                                                setNegotiateForm({ price: String(offer.price), terms: offer.terms || '' });
+                                                                // All items ticked by default — countering means unchecking, never retyping a price.
+                                                                setNegotiateForm({
+                                                                    checked: Object.fromEntries(displayItems.map(it => [it.id, true])),
+                                                                    terms: offer.terms || ''
+                                                                });
                                                             }}
                                                             style={{ padding: '0.4rem 0.8rem', borderRadius: 6, fontSize: '0.75rem', background: 'transparent', border: '1px solid var(--peacock-green)', color: 'var(--peacock-green)', fontWeight: 600, cursor: 'pointer' }}
                                                         >
@@ -1117,44 +1316,76 @@ export default function Messages() {
                                                 style={{ background: 'var(--bg-base)', padding: '0.85rem', borderRadius: 8, border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '0.25rem' }}
                                             >
                                                 <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>Propose Counter-offer</div>
-                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.6rem' }}>
-                                                    <input
-                                                        type="number"
-                                                        placeholder="Your price (₹)"
-                                                        required
-                                                        min="1"
-                                                        value={negotiateForm.price}
-                                                        onChange={e => setNegotiateForm(f => ({ ...f, price: e.target.value }))}
-                                                        style={{ padding: '0.45rem 0.6rem', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.8rem', background: 'var(--bg-surface)' }}
-                                                    />
-                                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
-                                                        Original: ₹{offer.price} • {offer.delivery_days}d • {offer.revisions} rev
-                                                    </div>
+                                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                                    Uncheck items to remove them — the price is calculated automatically, never typed.
                                                 </div>
-                                                <textarea
-                                                    placeholder="Revised terms (edit or remove specific items)"
-                                                    rows="3"
-                                                    value={negotiateForm.terms}
-                                                    onChange={e => setNegotiateForm(f => ({ ...f, terms: e.target.value }))}
-                                                    style={{ padding: '0.45rem 0.6rem', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.8rem', background: 'var(--bg-surface)', resize: 'vertical' }}
-                                                />
-                                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                                    <button
-                                                        type="submit"
-                                                        disabled={submittingNegotiate}
-                                                        className="btn-primary"
-                                                        style={{ padding: '0.4rem 0.9rem', borderRadius: 6, fontSize: '0.78rem', alignSelf: 'flex-start' }}
-                                                    >
-                                                        {submittingNegotiate ? 'Sending...' : 'Send Counter-offer'}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setShowNegotiateForm(false)}
-                                                        style={{ padding: '0.4rem 0.9rem', borderRadius: 6, fontSize: '0.78rem', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', cursor: 'pointer' }}
-                                                    >
-                                                        Cancel
-                                                    </button>
-                                                </div>
+
+                                                {(() => {
+                                                    const checkedCount = displayItems.filter(it => negotiateForm.checked?.[it.id]).length;
+                                                    const checkedTotal = displayItems.reduce((sum, it) => sum + (negotiateForm.checked?.[it.id] ? Number(it.price) : 0), 0);
+                                                    return (
+                                                        <>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                                                {displayItems.map(item => {
+                                                                    const isChecked = !!negotiateForm.checked?.[item.id];
+                                                                    return (
+                                                                        <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer' }}>
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={isChecked}
+                                                                                onChange={e => setNegotiateForm(f => ({ ...f, checked: { ...f.checked, [item.id]: e.target.checked } }))}
+                                                                                style={{ width: 16, height: 16, accentColor: 'var(--peacock-green)', cursor: 'pointer', flexShrink: 0 }}
+                                                                            />
+                                                                            <span style={{ flex: 1, color: isChecked ? 'var(--text-primary)' : 'var(--text-muted)', textDecoration: isChecked ? 'none' : 'line-through' }}>
+                                                                                {item.description}
+                                                                            </span>
+                                                                            <span style={{ fontWeight: 700, color: isChecked ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                                                                                ₹{Number(item.price).toFixed(2)}
+                                                                            </span>
+                                                                        </label>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)', borderTop: '1px dashed var(--border-color)', paddingTop: '0.35rem' }}>
+                                                                <span>New Total ({checkedCount} item{checkedCount === 1 ? '' : 's'})</span>
+                                                                <span>₹{checkedTotal.toFixed(2)}</span>
+                                                            </div>
+                                                            {checkedCount === 0 && (
+                                                                <div style={{ fontSize: '0.7rem', color: '#dc2626' }}>
+                                                                    Keep at least one item to send a counter-offer.
+                                                                </div>
+                                                            )}
+                                                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                                                Delivery & revisions unchanged: {offer.delivery_days}d • {offer.revisions} rev
+                                                            </div>
+                                                            <textarea
+                                                                placeholder="Revised terms (optional)"
+                                                                rows="2"
+                                                                value={negotiateForm.terms}
+                                                                onChange={e => setNegotiateForm(f => ({ ...f, terms: e.target.value }))}
+                                                                style={{ padding: '0.45rem 0.6rem', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.8rem', background: 'var(--bg-surface)', resize: 'vertical' }}
+                                                            />
+                                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                                <button
+                                                                    type="submit"
+                                                                    disabled={submittingNegotiate || checkedCount === 0}
+                                                                    className="btn-primary"
+                                                                    style={{ padding: '0.4rem 0.9rem', borderRadius: 6, fontSize: '0.78rem', alignSelf: 'flex-start', opacity: checkedCount === 0 ? 0.5 : 1 }}
+                                                                >
+                                                                    {submittingNegotiate ? 'Sending...' : 'Send Counter-offer'}
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setShowNegotiateForm(false)}
+                                                                    style={{ padding: '0.4rem 0.9rem', borderRadius: 6, fontSize: '0.78rem', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            </div>
+                                                        </>
+                                                    );
+                                                })()}
+
                                                 {(gigContext.chainDepth || 0) >= NEGOTIATE_CAP - 1 && (
                                                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                                                         ⚠️ This is your last negotiation round.
@@ -1234,9 +1465,28 @@ export default function Messages() {
                                         {paymentModal.phase === 'checkout' && (
                                             <>
                                                 <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>Opening secure payment...</h3>
-                                                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                                                    Amount: ₹{paymentModal.amounts?.buyer_amount}
-                                                </p>
+
+                                                <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '0.3rem', background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 10, padding: '0.75rem 0.9rem' }}>
+                                                    {(paymentModal.lineItems || []).map((item, idx) => (
+                                                        <div key={item.id || idx} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                                                            <span>{item.description}</span>
+                                                            <span>₹{Number(item.price).toFixed(2)}</span>
+                                                        </div>
+                                                    ))}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', borderTop: '1px dashed var(--border-color)', paddingTop: '0.25rem', marginTop: '0.1rem' }}>
+                                                        <span>Subtotal</span>
+                                                        <span>₹{Number(paymentModal.amounts?.offer_price).toFixed(2)}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                                        <span>Platform fee (+5%)</span>
+                                                        <span>₹{Number(paymentModal.amounts?.platform_fee_buyer).toFixed(2)}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.92rem', fontWeight: 800, color: 'var(--peacock-green)', borderTop: '1px solid var(--border-color)', paddingTop: '0.3rem', marginTop: '0.15rem' }}>
+                                                        <span>Total</span>
+                                                        <span>₹{Number(paymentModal.amounts?.buyer_amount).toFixed(2)}</span>
+                                                    </div>
+                                                </div>
+
                                                 <button
                                                     onClick={() => setPaymentModal(null)}
                                                     style={{ padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, cursor: 'pointer' }}
