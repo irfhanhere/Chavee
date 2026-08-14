@@ -10,6 +10,7 @@ import ChatWindow from '../components/messages/ChatWindow.jsx';
 import RightSidebar from '../components/messages/RightSidebar.jsx';
 import { ConversationListSkeleton, ChatWindowSkeleton } from '../components/messages/SkeletonLoaders.jsx';
 import DeliveryFiles from '../components/messages/DeliveryFiles.jsx';
+import { sanitizeFilenameForStorageKey } from '../utils/attachmentStorage.js';
 
 export default function Messages() {
     const navigate = useNavigate();
@@ -531,7 +532,7 @@ export default function Messages() {
             // and records the gig_delivery_files row itself via service role.
             // The client can never forge that row or the original path.
             if (deliveryFile) {
-                const fileName = `${Date.now()}_${deliveryFile.name.replace(/\s+/g, '_')}`;
+                const fileName = `${Date.now()}_${sanitizeFilenameForStorageKey(deliveryFile.name)}`;
                 const filePath = `${deliveryModal.contractId}/${fileName}`;
                 const { error: uploadError } = await supabase.storage
                     .from('gig-deliveries')
