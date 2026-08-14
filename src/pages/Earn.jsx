@@ -187,6 +187,7 @@ export default function Earn() {
     // Post Gig form state
     const [gigForm, setGigForm] = useState({ title: '', client: '', budget: '', deadline: '', skills: '', desc: '', categoryId: '' });
     const [gigCategories, setGigCategories] = useState([]);
+    const [gigAutoApprove, setGigAutoApprove] = useState(false);
 
     // gig_categories is empty right now (0 rows) — this still loads it live
     // so the picker below starts working the moment real categories exist,
@@ -348,6 +349,14 @@ export default function Earn() {
                 const g = localStorage.getItem(`gamification_${session.user.id}`);
                 if (g) setGamification(JSON.parse(g));
                 loadMyGigWorks(session.user.id);
+
+                // Step 6 — read for the post-form notice only (the actual
+                // gate is re-checked fresh at submit time in
+                // handlePostGigSubmit, this is just so the notice copy
+                // isn't misleadingly telling a trusted poster to expect a
+                // 2-hour review).
+                supabase.from('profiles').select('gig_auto_approve').eq('id', session.user.id).single()
+                    .then(({ data }) => setGigAutoApprove(!!data?.gig_auto_approve));
 
                 // "Your Earnings" card — same real source/query Earnings.jsx uses
                 // (gig_contracts.seller_net_amount, approved contracts only).
@@ -520,7 +529,25 @@ export default function Earn() {
             return;
         }
 
-        const payload = { ...basePayload, status: 'pending_review', verified: false, posted_by: user.id };
+        // Step 6 — auto-trust (read side). A poster flagged via
+        // profiles.gig_auto_approve (set manually by "Approve & Trust", or
+        // automatically after 3 clean approvals — both in the admin
+        // moderation queue) skips the review queue entirely: their gig goes
+        // straight to status: 'active', verified: true. verified_at/
+        // verified_by are deliberately left unset here — no admin actually
+        // verified this specific gig, an auto-approved post shouldn't claim
+        // one did.
+        const { data: posterProfile, error: profileErr } = await supabase
+            .from('profiles').select('gig_auto_approve').eq('id', user.id).single();
+        if (profileErr) console.error('Failed to check auto-approve status:', profileErr);
+        const autoApprove = !!posterProfile?.gig_auto_approve;
+
+        const payload = {
+            ...basePayload,
+            status: autoApprove ? 'active' : 'pending_review',
+            verified: autoApprove,
+            posted_by: user.id,
+        };
 
         const { data, error } = await supabase
             .from('gigs')
@@ -552,7 +579,12 @@ export default function Earn() {
         setGigForm({ title: '', client: '', budget: '', deadline: '', skills: '', desc: '', categoryId: '' });
         setPostingGig(false);
         setActiveMainTab('gigs');
-        showToast('🎉 Gig submitted for review! +50 XP & Gig Pioneer badge!', 'success');
+        showToast(
+            autoApprove
+                ? '🎉 Gig posted and live immediately — you\'re a trusted poster! +50 XP & Gig Pioneer badge!'
+                : '🎉 Gig submitted for review! +50 XP & Gig Pioneer badge!',
+            'success'
+        );
         loadGigs(user.id);
     };
 
@@ -1816,14 +1848,25 @@ export default function Earn() {
                                         {gigForm.desc.trim().length >= GIG_DESCRIPTION_MIN_LENGTH ? ' ✓' : ''}
                                     </div>
                                 </div>
-                                <div style={{ padding: '0.75rem 1rem', borderRadius: 10, background: 'rgba(17,94,89,0.06)', border: '1px solid rgba(17,94,89,0.15)', fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-                                    <span>⏳</span>
-                                    <span>All gigs are reviewed before going live — usually within 2 hours.</span>
-                                </div>
+                                {gigAutoApprove && !editingGigId ? (
+                                    <div style={{ padding: '0.75rem 1rem', borderRadius: 10, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', fontSize: '0.8rem', color: 'var(--peacock-green)', display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontWeight: 600 }}>
+                                        <span>⚡</span>
+                                        <span>You're a trusted poster — this gig goes live immediately, no review wait.</span>
+                                    </div>
+                                ) : (
+                                    <div style={{ padding: '0.75rem 1rem', borderRadius: 10, background: 'rgba(17,94,89,0.06)', border: '1px solid rgba(17,94,89,0.15)', fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                                        <span>⏳</span>
+                                        <span>{editingGigId ? 'Resubmitted gigs are reviewed again before going live — usually within 2 hours.' : 'All gigs are reviewed before going live — usually within 2 hours.'}</span>
+                                    </div>
+                                )}
                                 <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
                                     <button type="button" onClick={() => { setEditingGigId(null); setGigForm({ title: '', client: '', budget: '', deadline: '', skills: '', desc: '', categoryId: '' }); setActiveMainTab('gigs'); }} className="btn-ghost" style={{ padding: '0.75rem 1.5rem', borderRadius: 10 }}>Cancel</button>
                                     <button type="submit" disabled={postingGig || gigForm.desc.trim().length < GIG_DESCRIPTION_MIN_LENGTH} className="btn-primary" style={{ flex: 1, padding: '0.75rem', borderRadius: 10, opacity: (postingGig || gigForm.desc.trim().length < GIG_DESCRIPTION_MIN_LENGTH) ? 0.6 : 1, cursor: (postingGig || gigForm.desc.trim().length < GIG_DESCRIPTION_MIN_LENGTH) ? 'not-allowed' : 'pointer' }}>
-                                        {postingGig ? <ButtonSpinner label="Submitting..." /> : (editingGigId ? 'Resubmit for Review' : 'Submit for Review')}
+                                        {postingGig
+                                            ? <ButtonSpinner label="Submitting..." />
+                                            : editingGigId
+                                                ? 'Resubmit for Review'
+                                                : (gigAutoApprove ? 'Post Gig ⚡' : 'Submit for Review')}
                                     </button>
                                 </div>
                             </form>
