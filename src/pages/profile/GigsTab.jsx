@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabaseClient.js';
 import { PageLoader } from '../../components/Spinner.jsx';
-import { getAttachmentSignedUrl } from '../../utils/attachmentStorage.js';
+import DeliveryFiles from '../../components/messages/DeliveryFiles.jsx';
 
 const STATUS_LABELS = {
     awaiting_payment: 'Awaiting Payment',
@@ -20,32 +20,6 @@ const STATUS_STYLES = {
 const formatDate = (value) => value
     ? new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
     : null;
-
-// Resolves a delivery_file_url (a message-attachments storage path) to a signed URL for viewing/downloading
-function DeliveryFileLink({ filePath }) {
-    const [signedUrl, setSignedUrl] = useState(null);
-
-    useEffect(() => {
-        if (!filePath) return;
-        getAttachmentSignedUrl(filePath).then(url => {
-            if (url) setSignedUrl(url);
-        });
-    }, [filePath]);
-
-    if (!filePath) return null;
-    const fileName = filePath.split('/').pop() || 'Delivered file';
-
-    return (
-        <a
-            href={signedUrl || '#'}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--peacock-green)', textDecoration: 'underline' }}
-        >
-            📎 {signedUrl ? `View ${fileName}` : 'Loading file...'}
-        </a>
-    );
-}
 
 export default function GigsTab({ targetUserId }) {
     const [contracts, setContracts] = useState([]);
@@ -172,10 +146,10 @@ export default function GigsTab({ targetUserId }) {
                                 onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--peacock-green)'}
                                 onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-color)'}
                             >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                                    <div>
-                                        <h4 style={{ margin: '0 0 0.25rem 0', fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>{contract.gigTitle}</h4>
-                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem', gap: '0.5rem' }}>
+                                    <div style={{ minWidth: 0 }}>
+                                        <h4 style={{ margin: '0 0 0.25rem 0', fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{contract.gigTitle}</h4>
+                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>
                                             {contract.role === 'buyer' ? 'Seller' : 'Buyer'}: {contract.counterpartyName}
                                         </div>
                                     </div>
@@ -263,7 +237,11 @@ export default function GigsTab({ targetUserId }) {
                                 </div>
 
                                 {/* Delivery */}
-                                {(contract.delivery_message || contract.delivery_file_url) && (
+                                {/* Shown once a delivery has happened (submitted/approved) — not gated
+                                    on delivery_message/delivery_file_url since new deliveries no longer
+                                    write delivery_file_url. Seller sees their own upload unlocked; buyer
+                                    stays preview-only until status reaches 'approved' (DeliveryFiles). */}
+                                {(contract.status === 'submitted' || contract.status === 'approved') && (
                                     <div>
                                         <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Delivery Note</h4>
                                         {contract.delivery_message && (
@@ -271,7 +249,7 @@ export default function GigsTab({ targetUserId }) {
                                                 {contract.delivery_message}
                                             </p>
                                         )}
-                                        <DeliveryFileLink filePath={contract.delivery_file_url} />
+                                        <DeliveryFiles contract={contract} viewerIsSeller={!isBuyer} />
                                     </div>
                                 )}
 

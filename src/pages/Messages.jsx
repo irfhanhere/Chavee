@@ -4,38 +4,12 @@ import { supabase } from '../supabaseClient.js';
 import Toast, { useToast } from '../components/Toast.jsx';
 import PayoutSetupForm from '../components/PayoutSetupForm.jsx';
 import { usePresence } from '../hooks/usePresence.js';
-import { getAttachmentSignedUrl } from '../utils/attachmentStorage.js';
 
 import ConversationList from '../components/messages/ConversationList.jsx';
 import ChatWindow from '../components/messages/ChatWindow.jsx';
 import RightSidebar from '../components/messages/RightSidebar.jsx';
 import { ConversationListSkeleton, ChatWindowSkeleton } from '../components/messages/SkeletonLoaders.jsx';
-
-// Resolves a delivery_file_url (a message-attachments storage path) to a signed URL for viewing/downloading
-function DeliveryFileLink({ filePath }) {
-    const [signedUrl, setSignedUrl] = useState(null);
-
-    useEffect(() => {
-        if (!filePath) return;
-        getAttachmentSignedUrl(filePath).then(url => {
-            if (url) setSignedUrl(url);
-        });
-    }, [filePath]);
-
-    if (!filePath) return null;
-    const fileName = filePath.split('/').pop() || 'Delivered file';
-
-    return (
-        <a
-            href={signedUrl || '#'}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--peacock-green)', textDecoration: 'underline' }}
-        >
-            📎 {signedUrl ? `View ${fileName}` : 'Loading file...'}
-        </a>
-    );
-}
+import DeliveryFiles from '../components/messages/DeliveryFiles.jsx';
 
 export default function Messages() {
     const navigate = useNavigate();
@@ -549,15 +523,42 @@ export default function Messages() {
         if (!deliveryModal || !user) return;
         setSubmittingDelivery(true);
         try {
-            let deliveryFileUrl = null;
+            // Deliveries now go to the private gig-deliveries bucket (not the
+            // shared message-attachments bucket) and no longer write
+            // delivery_file_url directly — a server-side Edge Function
+            // (generate-delivery-preview) verifies the caller is really the
+            // seller on this contract, generates a real preview for images,
+            // and records the gig_delivery_files row itself via service role.
+            // The client can never forge that row or the original path.
             if (deliveryFile) {
                 const fileName = `${Date.now()}_${deliveryFile.name.replace(/\s+/g, '_')}`;
-                const filePath = `${user.id}/${fileName}`;
+                const filePath = `${deliveryModal.contractId}/${fileName}`;
                 const { error: uploadError } = await supabase.storage
-                    .from('message-attachments')
+                    .from('gig-deliveries')
                     .upload(filePath, deliveryFile, { cacheControl: '3600', upsert: false });
                 if (uploadError) throw uploadError;
-                deliveryFileUrl = filePath;
+
+                const { data: sessionData } = await supabase.auth.getSession();
+                const accessToken = sessionData?.session?.access_token;
+                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+
+                const previewResponse = await fetch(`${supabaseUrl}/functions/v1/generate-delivery-preview`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${accessToken}`,
+                    },
+                    body: JSON.stringify({
+                        contract_id: deliveryModal.contractId,
+                        storage_path: filePath,
+                        file_name: deliveryFile.name,
+                        file_type: deliveryFile.type,
+                    }),
+                });
+                const previewJson = await previewResponse.json();
+                if (!previewResponse.ok) {
+                    throw new Error(previewJson?.error || `Server error (${previewResponse.status})`);
+                }
             }
 
             const { error } = await supabase
@@ -566,7 +567,6 @@ export default function Messages() {
                     status: 'submitted',
                     work_submitted_at: new Date().toISOString(),
                     delivery_message: deliveryMessage.trim() || null,
-                    delivery_file_url: deliveryFileUrl,
                 })
                 .eq('id', deliveryModal.contractId);
             if (error) throw error;
@@ -1070,8 +1070,15 @@ export default function Messages() {
                                                 </button>
                                             )}
 
-                                            {/* Delivery content — buyer's view of what the seller submitted */}
-                                            {gigContext.contract?.status === 'submitted' && gigContext.isBuyer && (gigContext.contract?.delivery_message || gigContext.contract?.delivery_file_url) && (
+                                            {/* Delivery content — buyer's view of what the seller submitted.
+                                                Gated on 'submitted' OR 'approved' (not just 'submitted') so the
+                                                unlocked original stays reachable here once the buyer approves —
+                                                DeliveryFiles itself decides preview-vs-original per contract.status.
+                                                No longer gated on delivery_message/delivery_file_url being set:
+                                                new deliveries never write delivery_file_url, so that check would
+                                                hide every post-fix delivery. Reaching 'submitted' already implies
+                                                handleDeliverWork ran at least once. */}
+                                            {(gigContext.contract?.status === 'submitted' || gigContext.contract?.status === 'approved') && gigContext.isBuyer && (
                                                 <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '0.7rem 0.85rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                                                     <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Delivery Note</div>
                                                     {gigContext.contract.delivery_message && (
@@ -1079,7 +1086,7 @@ export default function Messages() {
                                                             {gigContext.contract.delivery_message}
                                                         </div>
                                                     )}
-                                                    <DeliveryFileLink filePath={gigContext.contract.delivery_file_url} />
+                                                    <DeliveryFiles contract={gigContext.contract} />
                                                 </div>
                                             )}
 

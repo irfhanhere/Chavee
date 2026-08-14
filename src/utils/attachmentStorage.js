@@ -32,12 +32,17 @@ export function normalizeAttachmentPath(value) {
   return trimmed;
 }
 
-export async function getAttachmentSignedUrl(value, ttl = ATTACHMENT_SIGNED_URL_TTL) {
+// bucket/ttl as an options object (not positional) so every existing call —
+// getAttachmentSignedUrl(value) — keeps working unchanged. Added so the
+// gig-delivery protection work (DeliveryFiles.jsx) can reuse this exact
+// pattern against the gig-deliveries / gig-delivery-previews buckets
+// instead of inventing a second signed-URL implementation.
+export async function getAttachmentSignedUrl(value, { bucket = ATTACHMENT_BUCKET, ttl = ATTACHMENT_SIGNED_URL_TTL } = {}) {
   const normalizedPath = normalizeAttachmentPath(value);
   if (!normalizedPath) return '';
 
   const { data, error } = await supabase.storage
-    .from(ATTACHMENT_BUCKET)
+    .from(bucket)
     .createSignedUrl(normalizedPath, ttl);
 
   if (error) {
