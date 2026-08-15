@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, useScroll, useTransform } from 'framer-motion';
-import { supabase } from '../supabaseClient.js';
 import Navbar from '../components/Navbar.jsx';
 import Footer from '../components/Footer.jsx';
 import { useAuth } from '../hooks/useAuth.js';
+import { useLandingStats } from '../hooks/useLandingStats.js';
+import { useIsMobile } from '../hooks/useIsMobile.js';
+import MobileLanding from './MobileLanding.jsx';
 
 /* ── Floating Notification Card Component ── */
 const FloatingCard = ({ delay, top, right, icon, title, subtitle }) => (
@@ -50,16 +52,8 @@ export default function Landing() {
     const navigate = useNavigate();
     const { user } = useAuth();
     const { scrollYProgress } = useScroll();
-    
-    const [stats, setStats] = useState({
-        students: 0,
-        communities: 0,
-        events: 0,
-        opportunities: 0,
-        courses: 0,
-        scholarships: 0,
-        blogs: 0
-    });
+    const stats = useLandingStats();
+    const isMobile = useIsMobile();
 
     const handleExplore = () => {
         sessionStorage.setItem('previewMode', 'true');
@@ -72,55 +66,24 @@ export default function Landing() {
         }
     }, [user, navigate]);
 
-    useEffect(() => {
-        async function fetchLiveStats() {
-            try {
-                let sCount = 0, eCount = 0, cCount = 0, oCount = 0;
-                
-                const { data, error } = await supabase.rpc('get_landing_stats');
-                if (!error && data) {
-                    const statsObj = Array.isArray(data) ? data[0] : data;
-                    if (statsObj) {
-                        sCount = statsObj.student_count || 0;
-                        eCount = statsObj.live_event_count || 0;
-                        cCount = statsObj.community_count || 0;
-                    }
-                }
-                
-                const [
-                    { count: jobCount }, 
-                    { count: gigCount },
-                    { count: coursesCount },
-                    { count: scholarshipsCount },
-                    { count: blogsCount }
-                ] = await Promise.all([
-                    supabase.from('jobs').select('*', { count: 'exact', head: true }).eq('status', 'live'),
-                    supabase.from('gigs').select('*', { count: 'exact', head: true }).eq('status', 'live').eq('verified', true),
-                    supabase.from('courses').select('*', { count: 'exact', head: true }),
-                    supabase.from('scholarships').select('*', { count: 'exact', head: true }),
-                    supabase.from('blogs').select('*', { count: 'exact', head: true })
-                ]);
-                oCount = (jobCount || 0) + (gigCount || 0);
-
-                setStats({ 
-                    students: sCount, 
-                    communities: cCount, 
-                    events: eCount, 
-                    opportunities: oCount,
-                    courses: coursesCount || 0,
-                    scholarships: scholarshipsCount || 0,
-                    blogs: blogsCount || 0
-                });
-            } catch (err) {
-                console.error("Failed to fetch stats", err);
-            }
-        }
-        fetchLiveStats();
-    }, []);
-
     // Parallax values
     const heroY = useTransform(scrollYProgress, [0, 0.2], [0, 100]);
     const heroOpacity = useTransform(scrollYProgress, [0, 0.2], [1, 0]);
+
+    // Mobile: same route, same data (stats above), same auth CTAs — reflowed,
+    // single-column rendering in its own component. This branch runs after
+    // every hook above has already been called, same pattern AppOpening.jsx
+    // uses for its own post-hooks early return. Nothing below this point
+    // (the desktop JSX) is reachable or altered when this branch is taken.
+    if (isMobile) {
+        return (
+            <div style={{ overflowX: 'hidden' }}>
+                <Navbar />
+                <MobileLanding stats={stats} handleExplore={handleExplore} />
+                <Footer />
+            </div>
+        );
+    }
 
     return (
         <div style={{ background: '#F8FAFC', minHeight: '100vh', fontFamily: "'Inter', sans-serif", overflowX: 'hidden' }}>
