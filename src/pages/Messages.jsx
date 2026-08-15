@@ -313,13 +313,24 @@ export default function Messages() {
             return;
         }
         try {
-            // 1. Find if this conversation is linked to a gig application
-            const { data: appData, error: appErr } = await supabase
+            // 1. Find if this conversation is linked to a gig application.
+            //    conversations are reused per (poster, applicant) pair across ALL their
+            //    gigs (intentional — same pattern as community group chat), so a single
+            //    conversation_id can legitimately have more than one gig_applications row
+            //    once the same two people transact on a second gig. .single() used to be
+            //    used here and would throw on 2+ rows, silently blanking the whole Gig Room
+            //    widget with no visible error. Fetch all matches instead and deterministically
+            //    take the most recently created one — the gig currently most relevant to
+            //    this pair's shared thread.
+            const { data: appMatches, error: appErr } = await supabase
                 .from('gig_applications')
                 .select('*, gigs(*)')
                 .eq('conversation_id', activeId)
-                .single();
-            
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            const appData = appMatches?.[0] || null;
+
             if (appErr || !appData) {
                 setGigContext(null);
                 return;
