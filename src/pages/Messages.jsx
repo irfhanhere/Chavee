@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient.js';
 import Toast, { useToast } from '../components/Toast.jsx';
 import PayoutSetupForm from '../components/PayoutSetupForm.jsx';
 import { usePresence } from '../hooks/usePresence.js';
+import { PAYOUTS_LIVE } from '../featureFlags.js';
 
 import ConversationList from '../components/messages/ConversationList.jsx';
 import ChatWindow from '../components/messages/ChatWindow.jsx';
@@ -414,6 +415,10 @@ export default function Messages() {
     // Check if seller needs to complete payout setup when gig page loads
     // Runs when gigContext is loaded and contains an accepted offer
     useEffect(() => {
+        // Payouts are manual bank/UPI transfer until Chavee Technologies LLP registers —
+        // cashfree-create-vendor has no local source anymore and shouldn't be fronted by
+        // this modal. See featureFlags.js.
+        if (!PAYOUTS_LIVE) return;
         if (!gigContext || !user) return;
 
         // Only show for the seller, when offer is accepted, and they haven't completed payout setup

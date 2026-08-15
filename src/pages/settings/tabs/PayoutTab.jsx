@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import PayoutSetupForm from '../../../components/PayoutSetupForm.jsx';
+import NotifyMeButton from '../../../components/NotifyMeButton.jsx';
+import { PAYOUTS_LIVE } from '../../../featureFlags.js';
 
 /**
  * PayoutTab — Settings tab for managing Cashfree payout setup.
@@ -9,10 +11,31 @@ import PayoutSetupForm from '../../../components/PayoutSetupForm.jsx';
  *   - Connected status (green banner) if cashfree_vendor_id is set, with an
  *     "Update payout method" option to re-open the form.
  *   - Inline PayoutSetupForm if cashfree_vendor_id is null.
+ *
+ * When PAYOUTS_LIVE is false (see featureFlags.js), the form is replaced
+ * entirely by an honest coming-soon card — cashfree-create-vendor has no
+ * local source anymore, so PayoutSetupForm would just be fronting a dead
+ * endpoint. This only gates the UI; PayoutSetupForm itself is untouched.
  */
 export default function PayoutTab({ user, profile, setProfile, showToast }) {
     // showForm is true when vendor_id is null (auto), or forced open via "Update"
     const [showForm, setShowForm] = useState(!profile?.cashfree_vendor_id);
+
+    if (!PAYOUTS_LIVE) {
+        return (
+            <div style={{ background: 'linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-mint) 100%)', padding: '2rem', borderRadius: 16, border: '1px dashed var(--border-mint)', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '1.5rem' }}>💳</span>
+                    <span style={{ fontSize: '0.65rem', background: 'var(--peacock-green)', color: '#fff', fontWeight: 800, padding: '0.15rem 0.5rem', borderRadius: 12 }}>COMING SOON</span>
+                </div>
+                <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 900 }}>Payout Setup</h2>
+                <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.88rem', lineHeight: 1.6 }}>
+                    Manual bank/UPI payouts until Chavee Technologies LLP registers — Cashfree setup isn't available yet.
+                </p>
+                <NotifyMeButton user={user} featureKey="payout_setup" style={{ marginTop: '0.25rem', alignSelf: 'flex-start' }} />
+            </div>
+        );
+    }
 
     const isConnected = !!profile?.cashfree_vendor_id;
     const statusLabel =
