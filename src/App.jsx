@@ -5,7 +5,7 @@ import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-do
 import AppShell   from './components/AppShell.jsx';
 
 // Pages
-import AppOpening from './pages/AppOpening.jsx';
+import Landing    from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
 import SignUp from './pages/SignUp.jsx';
 import ForgotPassword from './pages/ForgotPassword.jsx';
@@ -129,7 +129,7 @@ export default function App() {
             <ScrollToTop />
             <Routes>
                 {/* ── Public routes (own layouts) ── */}
-                <Route path="/"        element={<AppOpening />} />
+                <Route path="/"        element={<Landing />} />
                 <Route path="/login"   element={<Login />} />
                 <Route path="/signup"  element={<SignUp />} />
                 <Route path="/forgot-password" element={<ForgotPassword />} />
