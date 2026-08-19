@@ -13,9 +13,11 @@ import { PAYOUTS_LIVE } from '../../../featureFlags.js';
  *   - Inline PayoutSetupForm if cashfree_vendor_id is null.
  *
  * When PAYOUTS_LIVE is false (see featureFlags.js), the form is replaced
- * entirely by an honest coming-soon card — cashfree-create-vendor has no
- * local source anymore, so PayoutSetupForm would just be fronting a dead
- * endpoint. This only gates the UI; PayoutSetupForm itself is untouched.
+ * entirely by an honest coming-soon card. cashfree-create-vendor is real,
+ * deployed, and has full local source — it's deliberately not fronted
+ * while this flag is off, per the locked manual-payouts decision, not
+ * because the endpoint is gone. This only gates the UI; PayoutSetupForm
+ * itself is untouched.
  */
 export default function PayoutTab({ user, profile, setProfile, showToast }) {
     // showForm is true when vendor_id is null (auto), or forced open via "Update"

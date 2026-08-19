@@ -201,7 +201,7 @@ export default function SavedItems() {
                                 // Determine Open/Apply route
                                 let route = '';
                                 if (activeTab === 'job' || activeTab === 'gig') route = '/earn';
-                                if (activeTab === 'event') route = `/events/${item.content.id}`;
+                                if (activeTab === 'event') route = `/events/${item.content.slug || item.content.id}`;
                                 if (activeTab === 'course' || activeTab === 'scholarship') route = '/learn';
                                 if (activeTab === 'community') route = `/network?community=${item.content.id}`;
                                 if (activeTab === 'post') route = '/dashboard';

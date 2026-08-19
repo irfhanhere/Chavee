@@ -4,6 +4,10 @@ import { PageLoader, ButtonSpinner } from '../../../components/Spinner.jsx';
 
 export default function ConnectedAccountsTab({ user, showToast }) {
     const [accounts, setAccounts] = useState([]);
+    // Real identity objects from Supabase Auth (auth.getUserIdentities()) — kept
+    // alongside the provider-name list below because unlinkIdentity() needs the
+    // whole identity object, not just its provider string.
+    const [identities, setIdentities] = useState([]);
     const [loading, setLoading] = useState(true);
     const [actioning, setActioning] = useState(null); // 'google', 'github', etc.
 
@@ -14,6 +18,7 @@ export default function ConnectedAccountsTab({ user, showToast }) {
             if (error) {
                 console.error('Failed to fetch identities:', error);
             } else if (data?.identities) {
+                setIdentities(data.identities);
                 setAccounts(data.identities.map(identity => identity.provider));
             }
             setLoading(false);
@@ -41,17 +46,35 @@ export default function ConnectedAccountsTab({ user, showToast }) {
         }
     };
 
+    // Was deleting from a connected_accounts table that this account has zero
+    // rows in — the real "Connected" status above comes entirely from
+    // auth.getUserIdentities(), a completely different source. That table
+    // delete always affected 0 rows, so it silently did nothing: it showed a
+    // fake "Disconnected successfully" toast and optimistically hid the row,
+    // but the real Google identity link was untouched — a reload would show
+    // it as connected again. Fixed to call the real Supabase Auth
+    // unlinkIdentity() API against the actual identity object.
     const handleDisconnect = async (provider) => {
         if (!window.confirm(`Are you sure you want to disconnect ${provider}? You will no longer be able to log in using this method.`)) return;
-        
+
+        const identity = identities.find(i => i.provider === provider);
+        if (!identity) {
+            showToast(`Could not find a real ${provider} connection to disconnect.`, 'error');
+            return;
+        }
+
         setActioning(provider);
         try {
-            const { error } = await supabase.from('connected_accounts').delete().eq('user_id', user.id).eq('provider', provider);
+            const { error } = await supabase.auth.unlinkIdentity(identity);
             if (error) throw error;
             setAccounts(accounts.filter(a => a !== provider));
+            setIdentities(identities.filter(i => i.provider !== provider));
             showToast(`Disconnected ${provider} successfully.`, 'success');
         } catch (err) {
-            showToast(`Failed to disconnect ${provider}`, 'error');
+            // Real Supabase error here includes the case where this is the
+            // user's only remaining identity — surface it as-is rather than
+            // a generic message, matching this session's established pattern.
+            showToast(err.message || `Failed to disconnect ${provider}`, 'error');
         } finally {
             setActioning(null);
         }

@@ -1,6 +1,12 @@
 import React from 'react';
 
-export function FeatureList({ features }) {
+// features defaults to [] — ForgotPassword.jsx and ResetPassword.jsx were
+// both calling <BrandPanel> with no features prop at all, and this used to
+// crash on features.map() with no error boundary on these routes (confirmed
+// live: real blank white page, real uncaught TypeError). Both callers now
+// pass real content too (see their own files), but this default stays as a
+// second line of defense against any future caller doing the same thing.
+export function FeatureList({ features = [] }) {
     return (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '1.25rem', fontSize: '1.15rem', opacity: 0.9 }}>
             {features.map((feature, idx) => (

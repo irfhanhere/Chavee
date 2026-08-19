@@ -24,6 +24,7 @@ export default function Learn() {
     const [resources, setResources] = useState([]);
     const [educationCategories, setEducationCategories] = useState([]);
     const [learningStats, setLearningStats] = useState(null);
+    const [upcomingEvents, setUpcomingEvents] = useState([]);
     const [loadingData, setLoadingData] = useState(true);
 
     // Tab state: 'overview' | 'courses' | 'certifications' | 'scholarships' | 'resources'
@@ -116,7 +117,22 @@ export default function Learn() {
             } catch (err) {
                 console.error("Error fetching education data:", err);
             }
-            
+
+            // Upcoming Event hero banner — same real query + columns as
+            // Dashboard's mobile "Upcoming Event" banner (fail gracefully,
+            // no banner renders if none/errored).
+            try {
+                const { data: evData, error: evError } = await supabase
+                    .from('events')
+                    .select('*')
+                    .in('status', ['live', 'coming_soon', 'Live', 'Coming Soon', 'upcoming', 'Upcoming'])
+                    .order('event_date', { ascending: true })
+                    .limit(3);
+                if (!evError && evData) setUpcomingEvents(evData);
+            } catch (err) {
+                console.error("Error fetching upcoming events:", err);
+            }
+
             setLoadingData(false);
         }
         fetchAllData();
@@ -678,6 +694,34 @@ export default function Learn() {
                                             ))}
                                         </div>
                                     </section>
+
+                                    {/* Upcoming Event — real data, same events query + banner style as
+                                        Dashboard's mobile "Upcoming Event" widget (upcomingEvents[0]).
+                                        No carousel, single card, "View all" links to /events. */}
+                                    {upcomingEvents.length > 0 && (() => {
+                                        const ev = upcomingEvents[0];
+                                        const dateLabel = new Date(ev.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+                                        const timeLabel = new Date(ev.event_date).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+                                        return (
+                                            <section>
+                                                <h2 style={S.sectionTitle}>Upcoming Event</h2>
+                                                <div style={{ background: 'linear-gradient(135deg, #115E59 0%, #0B3B36 100%)', borderRadius: 16, padding: '1.25rem', color: '#fff', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                                    <span style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.6px', opacity: 0.85 }}>Upcoming Event</span>
+                                                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, lineHeight: 1.3 }}>{ev.title}</h3>
+                                                    <span style={{ fontSize: '0.8rem', opacity: 0.9 }}>{dateLabel} • {timeLabel}</span>
+                                                    <div style={{ display: 'flex', gap: '1rem', marginTop: '0.6rem', alignItems: 'center' }}>
+                                                        <Link
+                                                            to={`/events/${ev.slug || ev.id}`}
+                                                            style={{ background: '#F5A623', color: '#1A1A1A', border: 'none', borderRadius: 10, padding: '0.6rem 1.25rem', fontWeight: 700, fontSize: '0.85rem', textDecoration: 'none', display: 'inline-block' }}
+                                                        >
+                                                            Register Now
+                                                        </Link>
+                                                        <Link to="/events" style={{ color: '#fff', fontSize: '0.8rem', fontWeight: 700, textDecoration: 'underline', textUnderlineOffset: 3 }}>View all</Link>
+                                                    </div>
+                                                </div>
+                                            </section>
+                                        );
+                                    })()}
 
                                     {/* Featured Courses */}
                                     <section>

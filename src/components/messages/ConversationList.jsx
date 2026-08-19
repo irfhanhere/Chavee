@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ConversationListSkeleton } from './SkeletonLoaders.jsx';
 
 export default function ConversationList({
@@ -6,14 +6,32 @@ export default function ConversationList({
     loading = false,
     activeId = null,
     onSelect,
+    onDeleteConversation, // (conversationId) => void — "•••" menu's Delete action
     searchQuery = '',
     onSearchChange,
     activeTab = 'All', // 'All', 'Connect', 'Request' — connection-status filter, scoped to the Chats room tab
     onTabChange,
-    roomTab = 'Chats', // 'Chats', 'Gig Rooms' — independent axis: conversations.type
+    roomTab = 'Chats', // 'Chats', 'Gig Rooms' — independent axis, derived from gigConversationIds below
     onRoomTabChange,
+    // Set of conversation ids with at least one linked gig_applications row — derived
+    // dynamically by Messages.jsx (one batched query), not from conversations.type.
+    // conversations.type defaults to 'dm' for every conversation regardless of origin
+    // (confirmed live — neither creation path ever sets it), so it can't be used here.
+    gigConversationIds = new Set(),
     onlineUsers = new Set()
 }) {
+    // Which row's "•••" overflow menu is open, if any — same single-menu-at-a-
+    // time pattern as Profile.jsx's connection menu. Declared before the
+    // loading early-return below so hook order stays stable across renders.
+    const [menuOpenId, setMenuOpenId] = useState(null);
+    // Which row is showing the in-app "are you sure?" confirm step. NOT
+    // window.confirm() — confirmed live that native confirm() is silently
+    // suppressed in this PWA's real contexts (installed PWAs on iOS/Android
+    // routinely no-op alert/confirm/prompt with zero visual feedback), which
+    // was the actual cause of "clicking Delete does nothing." This renders
+    // the confirm step in-app instead, so it can never silently no-op.
+    const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
     if (loading) return <ConversationListSkeleton />;
 
     const renderAvatar = (avatarData, name, size = 48) => {
@@ -54,14 +72,14 @@ export default function ConversationList({
         return new Date(dateStr).toLocaleDateString([], { month: 'short', day: 'numeric' });
     };
 
-    const gigRoomCount = conversations.filter(c => c.type === 'gig_room').length;
+    const gigRoomCount = conversations.filter(c => gigConversationIds.has(c.id)).length;
     const chatsCount = conversations.length - gigRoomCount;
 
     const filteredConversations = conversations.filter(c => {
         // Room tab is the primary split: Gig Rooms are business threads (created automatically
         // off a gig application) and aren't gated by the social connection system at all, so the
         // Connect/Request filter below only makes sense inside the Chats tab.
-        const isGigRoom = c.type === 'gig_room';
+        const isGigRoom = gigConversationIds.has(c.id);
         if (roomTab === 'Gig Rooms' && !isGigRoom) return false;
         if (roomTab === 'Chats' && isGigRoom) return false;
 
@@ -160,10 +178,10 @@ export default function ConversationList({
                         const preview = c.lastMsg ? (c.lastMsg.file_url ? '📎 Attachment' : c.lastMsg.content) : '';
                         
                         return (
-                            <div 
-                                key={c.id} 
-                                onClick={() => onSelect(c)}
-                                className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 mb-1 ${
+                            <div
+                                key={c.id}
+                                onClick={() => { onSelect(c); setMenuOpenId(null); setConfirmDeleteId(null); }}
+                                className={`relative flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 mb-1 ${
                                     isActive ? 'bg-[#f0fdf4]' : 'hover:bg-gray-50'
                                 }`}
                             >
@@ -176,7 +194,7 @@ export default function ConversationList({
                                 <div className="flex-1 min-w-0 border-b border-transparent">
                                     <div className="flex justify-between items-center mb-1">
                                         <span className="text-[1.05rem] font-semibold text-gray-900 truncate flex items-center gap-1.5">
-                                            {c.type === 'gig_room' && (
+                                            {gigConversationIds.has(c.id) && (
                                                 <span
                                                     className="shrink-0 text-[0.65rem] font-bold bg-amber-100 text-amber-700 px-1.5 py-[1px] rounded-full"
                                                     title="Gig Room"
@@ -202,6 +220,60 @@ export default function ConversationList({
                                         )}
                                     </div>
                                 </div>
+
+                                {/* "•••" overflow menu — same pattern as Profile.jsx's connection
+                                    menu. Only action today is Delete (soft-hide via the
+                                    hide_conversation RPC); stopPropagation everywhere so it never
+                                    also triggers onSelect on the row underneath. Confirm step is
+                                    rendered in-app (below), not window.confirm() — see
+                                    confirmDeleteId's comment above for why. */}
+                                {onDeleteConversation && (
+                                    <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
+                                        <button
+                                            onClick={() => {
+                                                const opening = menuOpenId !== c.id;
+                                                setMenuOpenId(opening ? c.id : null);
+                                                if (!opening) setConfirmDeleteId(null);
+                                            }}
+                                            className="text-gray-400 hover:bg-gray-200 hover:text-gray-600 rounded-full w-7 h-7 flex items-center justify-center transition-colors"
+                                            title="More options"
+                                        >
+                                            •••
+                                        </button>
+                                        {menuOpenId === c.id && (
+                                            <div className="absolute right-0 top-8 z-30 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[220px] overflow-hidden">
+                                                {confirmDeleteId === c.id ? (
+                                                    <div className="p-3">
+                                                        <p className="text-sm text-gray-800 mb-3">
+                                                            Delete this conversation? It'll disappear from your list — you'll see it again if they message you.
+                                                        </p>
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                onClick={() => { setMenuOpenId(null); setConfirmDeleteId(null); }}
+                                                                className="flex-1 px-3 py-1.5 rounded-lg text-sm font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                            <button
+                                                                onClick={() => { setMenuOpenId(null); setConfirmDeleteId(null); onDeleteConversation(c.id); }}
+                                                                className="flex-1 px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors"
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => setConfirmDeleteId(c.id)}
+                                                        className="w-full text-left px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 transition-colors"
+                                                    >
+                                                        🗑️ Delete conversation
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         );
                     })

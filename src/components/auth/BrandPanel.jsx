@@ -29,9 +29,12 @@ export function BrandPanel({ heading, subtitle, features }) {
             </div>
             
             <div style={{ position: 'relative', zIndex: 10, marginTop: 'auto', marginBottom: '2rem' }}>
-                <h1 style={{ fontSize: 'clamp(2.5rem, 5vw, 3.5rem)', fontWeight: 900, marginBottom: '1rem', lineHeight: 1.1, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
+                {/* Not the real page h1 — decorative brand-panel copy.
+                    AuthCard's own heading (the actual "Log in"/"Sign up"
+                    form heading) is the one real h1 for these pages. */}
+                <p style={{ fontSize: 'clamp(2.5rem, 5vw, 3.5rem)', fontWeight: 900, marginBottom: '1rem', lineHeight: 1.1, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
                     {heading}
-                </h1>
+                </p>
                 <p style={{ fontSize: '1.25rem', opacity: 0.9, maxWidth: '480px', lineHeight: 1.5, marginBottom: '3rem', color: '#DFF7EA' }}>
                     {subtitle}
                 </p>

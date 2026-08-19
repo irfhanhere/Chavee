@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { Turnstile } from '@marsidev/react-turnstile';
 import { supabase } from '../supabaseClient.js';
 import { ChaveeLogo } from '../Logo.jsx';
 import { ButtonSpinner } from '../components/Spinner.jsx';
 import Toast, { useToast } from '../components/Toast.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
+import SEO from '../components/SEO.jsx';
 
 import { AuthLayout } from '../components/auth/AuthLayout.jsx';
 import { BrandPanel } from '../components/auth/BrandPanel.jsx';
@@ -18,17 +20,24 @@ export default function ForgotPassword() {
     const [loading, setLoading] = useState(false);
     const [isSent, setIsSent] = useState(false);
 
+    // Turnstile — see SignUp.jsx for the full rationale; same Dashboard-
+    // configured Bot and Abuse Protection, same options.captchaToken shape.
+    const [captchaToken, setCaptchaToken] = useState('');
+    const turnstileRef = useRef(null);
+
     const handleReset = async (e) => {
         e.preventDefault();
         if (!email) { showToast('Please enter your email.', 'warning'); return; }
+        if (!captchaToken) { showToast('Please complete the verification challenge.', 'warning'); return; }
         setLoading(true);
         try {
-            const redirectUrl = import.meta.env.PROD 
+            const redirectUrl = import.meta.env.PROD
                 ? 'https://chavee.in/reset-password'
                 : `${window.location.origin}/reset-password`;
-                
+
             const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
                 redirectTo: redirectUrl,
+                captchaToken,
             });
             if (error) throw error;
             setIsSent(true);
@@ -36,8 +45,21 @@ export default function ForgotPassword() {
             showToast(err.message || 'Failed to send reset email.', 'error');
         } finally {
             setLoading(false);
+            turnstileRef.current?.reset();
+            setCaptchaToken('');
         }
     };
+
+    // BrandPanel unconditionally renders <FeatureList features={features} />
+    // — this page called it with no features prop at all, which crashed the
+    // whole route (real blank white page, confirmed live via a real uncaught
+    // "Cannot read properties of undefined (reading 'map')" in FeatureList).
+    // Real content now, matching Login.jsx/SignUp.jsx's own feature lists.
+    const forgotPasswordFeatures = [
+        { heading: "Secure recovery", description: "We'll email a real reset link to your inbox.", icon: "🔒" },
+        { heading: "Back in seconds", description: "Set a new password and you're straight back in.", icon: "⚡" },
+        { heading: "Your data stays safe", description: "Nothing changes until you confirm the new password.", icon: "🛡️" },
+    ];
 
     if (isSent) {
         return (
@@ -74,20 +96,31 @@ export default function ForgotPassword() {
     }
 
     return (
-        <AuthLayout 
+        <>
+        <SEO
+            title="Forgot Password | Chavee"
+            description="Reset your Chavee account password to get back into your student profile, courses, gigs, and communities."
+            path="/forgot-password"
+        />
+        <AuthLayout
             leftPanel={
-                <BrandPanel 
+                <BrandPanel
                     heading={<>Forgot your<br/>password?</>}
                     subtitle="No worries, we'll help you get back into your account."
+                    features={forgotPasswordFeatures}
                 />
             }
             mobileHeader={
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
                     <ChaveeLogo height={32} light />
                     <div>
-                        <h1 style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '0.25rem', lineHeight: 1.1, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
+                        {/* Not a real <h1> — BrandPanel's heading is already the page's
+                            one real h1 (desktop panel), and both exist in the DOM
+                            simultaneously (CSS-toggled by breakpoint, not conditionally
+                            rendered), so a second h1 here would be a real duplicate-h1 bug. */}
+                        <p style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '0.25rem', lineHeight: 1.1, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
                             Reset Password
-                        </h1>
+                        </p>
                         <p style={{ fontSize: '1rem', opacity: 0.9, color: '#DFF7EA', margin: 0 }}>
                             We'll help you get back in.
                         </p>
@@ -106,23 +139,33 @@ export default function ForgotPassword() {
                         required 
                     />
 
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.25rem' }}>
+                        <Turnstile
+                            ref={turnstileRef}
+                            siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                            onSuccess={setCaptchaToken}
+                            onExpire={() => setCaptchaToken('')}
+                            onError={() => setCaptchaToken('')}
+                        />
+                    </div>
+
                     <motion.button
-                        whileHover={!loading ? { scale: 1.02, boxShadow: '0 8px 20px rgba(11,143,90,0.2)' } : {}}
-                        whileTap={!loading ? { scale: 0.98 } : {}}
+                        whileHover={!(loading || !captchaToken) ? { scale: 1.02, boxShadow: '0 8px 20px rgba(11,143,90,0.2)' } : {}}
+                        whileTap={!(loading || !captchaToken) ? { scale: 0.98 } : {}}
                         type="submit"
-                        disabled={loading}
-                        style={{ 
-                            width: '100%', 
-                            padding: '1rem', 
+                        disabled={loading || !captchaToken}
+                        style={{
+                            width: '100%',
+                            padding: '1rem',
                             background: '#0B8F5A',
                             color: '#FFFFFF',
-                            fontSize: '1.05rem', 
+                            fontSize: '1.05rem',
                             fontWeight: 700,
-                            borderRadius: '12px', 
+                            borderRadius: '12px',
                             border: 'none',
                             marginTop: '1rem',
-                            opacity: loading ? 0.7 : 1,
-                            cursor: loading ? 'not-allowed' : 'pointer',
+                            opacity: (loading || !captchaToken) ? 0.7 : 1,
+                            cursor: (loading || !captchaToken) ? 'not-allowed' : 'pointer',
                             boxShadow: '0 4px 10px rgba(11,143,90,0.1)'
                         }}
                     >
@@ -135,5 +178,6 @@ export default function ForgotPassword() {
 
             <Toast {...toast} onHide={hideToast} />
         </AuthLayout>
+        </>
     );
 }

@@ -67,14 +67,13 @@ export default function PreferencesTab({ user, showToast }) {
 
         setSavingInterface(true);
         try {
-            console.log('DEBUG user_preferences update payload:', { table: 'user_preferences', update: changed, match: { user_id: user.id } });
             const { error } = await supabase.from('user_preferences').update(changed).eq('user_id', user.id);
             if (error) throw error;
 
             setPrefs({ ...prefs, ...changed });
             showToast('Preferences saved', 'success');
         } catch (err) {
-            console.error('Failed to update interface preferences:', { message: err.message, code: err.code, details: err.details, hint: err.hint, full: err });
+            console.error('Failed to update interface preferences:', err);
             showToast(err.message || 'Failed to save preferences', 'error');
         } finally {
             setSavingInterface(false);

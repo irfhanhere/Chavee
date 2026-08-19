@@ -73,6 +73,10 @@ export default function PayoutSetupForm({ sellerProfileId, onSuccess, onCancel, 
                     pan_number: upiForm.pan_number.trim().toUpperCase(),
                 };
 
+            // This component is only reachable while PAYOUTS_LIVE is false-gated off
+            // (see featureFlags.js) — before ever flipping that flag back to true,
+            // re-verify this endpoint is still deployed and actually works end-to-end;
+            // don't assume it still does just because it did the last time this ran.
             const response = await fetch(`${supabaseUrl}/functions/v1/cashfree-create-vendor`, {
                 method: 'POST',
                 headers: {

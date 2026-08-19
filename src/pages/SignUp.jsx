@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Turnstile } from '@marsidev/react-turnstile';
 import { supabase } from '../supabaseClient.js';
 import { ChaveeLogo } from '../Logo.jsx';
 import { ButtonSpinner } from '../components/Spinner.jsx';
 import Toast, { useToast } from '../components/Toast.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
+import SEO from '../components/SEO.jsx';
 
 import { AuthLayout } from '../components/auth/AuthLayout.jsx';
 import { BrandPanel } from '../components/auth/BrandPanel.jsx';
@@ -91,6 +93,13 @@ export default function SignUp() {
     const [usernameStatus, setUsernameStatus] = useState(''); // '', 'checking', 'available', 'taken', 'invalid'
     const usernameTimer = React.useRef(null);
 
+    // Turnstile — Bot and Abuse Protection is active on the linked Supabase
+    // project (Dashboard-configured), which expects options.captchaToken on
+    // the auth call itself. The widget token is single-use, so it's reset
+    // after every attempt (success or failure) via turnstileRef.
+    const [captchaToken, setCaptchaToken] = useState('');
+    const turnstileRef = useRef(null);
+
     // Password validation logic
     const hasMinLength = password.length >= 8;
     const hasUpper = /[A-Z]/.test(password);
@@ -148,9 +157,10 @@ export default function SignUp() {
         if (!isPasswordValid) { showToast('Please meet all password requirements.', 'warning'); return; }
         if (password !== confirmPassword) { showToast('Passwords do not match.', 'warning'); return; }
         if (!agreeTerms) { showToast('You must agree to the Terms of Service and Privacy Policy.', 'warning'); return; }
+        if (!captchaToken) { showToast('Please complete the verification challenge.', 'warning'); return; }
 
         setLoading(true);
-        setRateLimitError(false); 
+        setRateLimitError(false);
         try {
             const { data, error } = await supabase.auth.signUp({
                 email: email.trim().toLowerCase(),
@@ -158,12 +168,23 @@ export default function SignUp() {
                 options: {
                     data: { full_name: name.trim() },
                     emailRedirectTo: getRedirectUrl(),
+                    captchaToken,
                 },
             });
             if (error) {
                 if (error.code === 'over_email_send_rate_limit' || error.status === 429 || error.message.includes('rate limit') || error.message.includes('limit exceeded')) {
                     setRateLimitError(true);
                     showToast("We're experiencing high signup volume right now. Please try again in a few minutes, or continue with Google instead.", 'error');
+                    setLoading(false);
+                    return;
+                }
+                // Rejected by the "before user created" DB auth hook
+                // (public.hook_reject_disposable_email_domains) for a known
+                // disposable/temp-mail domain. Match on a stable substring
+                // rather than the full string, so the copy stays clean even
+                // if supabase-js wraps/prefixes the hook's raw message.
+                if (error.message && error.message.toLowerCase().includes('disposable')) {
+                    showToast('Please use a real, non-disposable email address to sign up.', 'error');
                     setLoading(false);
                     return;
                 }
@@ -209,6 +230,10 @@ export default function SignUp() {
             setLoading(false);
             setSubmitThrottled(true);
             setTimeout(() => setSubmitThrottled(false), 4000);
+            // Turnstile tokens are single-use — reset for the next attempt
+            // regardless of outcome.
+            turnstileRef.current?.reset();
+            setCaptchaToken('');
         }
     };
 
@@ -281,9 +306,15 @@ export default function SignUp() {
     ];
 
     return (
-        <AuthLayout 
+        <>
+        <SEO
+            title="Sign Up | Chavee"
+            description="Create a free Chavee account — India's first student social platform for learning, earning, networking, and events."
+            path="/signup"
+        />
+        <AuthLayout
             leftPanel={
-                <BrandPanel 
+                <BrandPanel
                     heading={<>Launch your future<br/>with Chavee.</>}
                     subtitle="Join India's first student social platform and connect, learn, earn and grow together."
                     features={signupFeatures}
@@ -293,9 +324,13 @@ export default function SignUp() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
                     <ChaveeLogo height={32} light />
                     <div>
-                        <h1 style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '0.25rem', lineHeight: 1.1, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
+                        {/* Not a real <h1> — BrandPanel's heading is already the page's
+                            one real h1 (same text, desktop panel), and both exist in the
+                            DOM simultaneously (CSS-toggled by breakpoint, not conditionally
+                            rendered), so a second h1 here would be a real duplicate-h1 bug. */}
+                        <p style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '0.25rem', lineHeight: 1.1, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
                             Launch your future
-                        </h1>
+                        </p>
                         <p style={{ fontSize: '1rem', opacity: 0.9, color: '#DFF7EA', margin: 0 }}>
                             Join India's first student social platform.
                         </p>
@@ -433,23 +468,33 @@ export default function SignUp() {
                         </label>
                     </div>
 
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.25rem' }}>
+                        <Turnstile
+                            ref={turnstileRef}
+                            siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                            onSuccess={setCaptchaToken}
+                            onExpire={() => setCaptchaToken('')}
+                            onError={() => setCaptchaToken('')}
+                        />
+                    </div>
+
                     <motion.button
-                        whileHover={!(loading || googleLoading || submitThrottled) ? { scale: 1.02, boxShadow: '0 8px 20px rgba(11,143,90,0.2)' } : {}}
-                        whileTap={!(loading || googleLoading || submitThrottled) ? { scale: 0.98 } : {}}
+                        whileHover={!(loading || googleLoading || submitThrottled || !captchaToken) ? { scale: 1.02, boxShadow: '0 8px 20px rgba(11,143,90,0.2)' } : {}}
+                        whileTap={!(loading || googleLoading || submitThrottled || !captchaToken) ? { scale: 0.98 } : {}}
                         type="submit"
-                        disabled={loading || googleLoading || submitThrottled}
-                        style={{ 
-                            width: '100%', 
-                            padding: '1rem', 
+                        disabled={loading || googleLoading || submitThrottled || !captchaToken}
+                        style={{
+                            width: '100%',
+                            padding: '1rem',
                             background: '#0B8F5A',
                             color: '#FFFFFF',
-                            fontSize: '1.05rem', 
+                            fontSize: '1.05rem',
                             fontWeight: 700,
-                            borderRadius: '12px', 
+                            borderRadius: '12px',
                             border: 'none',
                             marginTop: '1rem',
-                            opacity: (loading || googleLoading || submitThrottled) ? 0.7 : 1,
-                            cursor: (loading || googleLoading || submitThrottled) ? 'not-allowed' : 'pointer',
+                            opacity: (loading || googleLoading || submitThrottled || !captchaToken) ? 0.7 : 1,
+                            cursor: (loading || googleLoading || submitThrottled || !captchaToken) ? 'not-allowed' : 'pointer',
                             boxShadow: '0 4px 10px rgba(11,143,90,0.1)'
                         }}
                     >
@@ -468,5 +513,6 @@ export default function SignUp() {
 
             <Toast {...toast} onHide={hideToast} />
         </AuthLayout>
+        </>
     );
 }

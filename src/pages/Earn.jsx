@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
 import Toast, { useToast } from '../components/Toast.jsx';
@@ -185,10 +185,10 @@ export default function Earn() {
     // Search & filters
     const [search, setSearch]             = useState('');
     const [jobFilter, setJobFilter]       = useState('All Jobs');
-    
+
     // Extended Job Filters
     const [jobAdvancedFilters, setJobAdvancedFilters] = useState({
-        experience: 'All', salary: 'All', category: 'All', location: 'All', remote: false, verifiedOnly: false, postedToday: false
+        experience: 'All', salary: 'All', category: 'All', location: 'All', company: 'All Companies', remote: false, verifiedOnly: false, postedToday: false
     });
 
     // Extended Gig Filters
@@ -304,7 +304,7 @@ export default function Earn() {
         try {
             const { data, error } = await supabase
                 .from('jobs')
-                .select('*')
+                .select('*, companies(id, name, logo_url, is_official)')
                 .ilike('status', 'live')
                 .order('created_at', { ascending: false });
             if (error) throw error;
@@ -470,9 +470,10 @@ export default function Earn() {
         const matchCat = jobAdvancedFilters.category === 'All' || j.category === jobAdvancedFilters.category;
         const matchExp = jobAdvancedFilters.experience === 'All' || j.experience === jobAdvancedFilters.experience;
         const matchLoc = jobAdvancedFilters.location === 'All' || j.location?.includes(jobAdvancedFilters.location);
+        const matchCompany = jobAdvancedFilters.company === 'All Companies' || j.companies?.name === jobAdvancedFilters.company;
         const matchRem = !jobAdvancedFilters.remote || j.location?.toLowerCase().includes('remote') || j.remote_only;
         const matchVer = !jobAdvancedFilters.verifiedOnly || j.verified;
-        
+
         let matchToday = true;
         if (jobAdvancedFilters.postedToday) {
             const today = new Date();
@@ -480,8 +481,16 @@ export default function Earn() {
             matchToday = postedDate.toDateString() === today.toDateString();
         }
 
-        return matchTab && matchSearch && matchCat && matchExp && matchLoc && matchRem && matchVer && matchToday;
+        return matchTab && matchSearch && matchCat && matchExp && matchLoc && matchCompany && matchRem && matchVer && matchToday;
     });
+
+    // Real distinct companies among the currently loaded live jobs — not a
+    // hardcoded list.
+    const jobCompanyOptions = useMemo(() => {
+        const seen = new Map();
+        jobsList.forEach(j => { if (j.companies) seen.set(j.companies.id, j.companies.name); });
+        return ['All Companies', ...seen.values()];
+    }, [jobsList]);
 
     // Extended Gigs Filtering
     const displayedGigs = gigsList.filter(g => {
@@ -2194,6 +2203,7 @@ export default function Earn() {
                                             <FilterSelect label="Experience" value={jobAdvancedFilters.experience} onChange={v => setJobAdvancedFilters(p => ({...p, experience: v}))} options={['All', 'Entry Level', '1-2 Years', '3+ Years']} />
                                             <FilterSelect label="Salary" value={jobAdvancedFilters.salary} onChange={v => setJobAdvancedFilters(p => ({...p, salary: v}))} options={['All', 'Paid', 'Unpaid/Equity']} />
                                             <FilterSelect label="Category" value={jobAdvancedFilters.category} onChange={v => setJobAdvancedFilters(p => ({...p, category: v}))} options={['All', 'Engineering', 'Design', 'Marketing', 'Sales', 'Product', 'Other']} />
+                                            <FilterSelect label="Company" value={jobAdvancedFilters.company} onChange={v => setJobAdvancedFilters(p => ({...p, company: v}))} options={jobCompanyOptions} />
                                             <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.5rem' }}>
                                                 <input type="checkbox" checked={jobAdvancedFilters.remote} onChange={e => setJobAdvancedFilters(p => ({...p, remote: e.target.checked}))} />
                                                 Remote Only
@@ -2255,12 +2265,14 @@ export default function Earn() {
                                         displayedJobs.map(job => (
                                             <div key={job.id} style={{ ...S.card, cursor: 'pointer', padding: '1.1rem', gap: '0.5rem' }} onClick={() => setViewingJob(job)}>
                                                 <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
-                                                    <span style={{ fontSize: '1.4rem', background: 'var(--bg-elevated)', borderRadius: 10, width: 42, height: 42, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                        {job.logo || '🏢'}
+                                                    <span style={{ fontSize: '1.4rem', background: 'var(--bg-elevated)', borderRadius: 10, width: 42, height: 42, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                                        {job.companies?.logo_url ? (
+                                                            <img src={job.companies.logo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                                        ) : (job.logo || '🏢')}
                                                     </span>
                                                     <div style={{ flex: 1, minWidth: 0 }}>
                                                         <h3 style={{ fontSize: '0.98rem', fontWeight: 800, margin: '0 0 0.15rem 0', overflowWrap: 'anywhere' }}>{job.title}</h3>
-                                                        <p style={{ fontSize: '0.8rem', color: 'var(--peacock-green)', fontWeight: 700, margin: '0 0 0.4rem 0' }}>{job.company}</p>
+                                                        <p style={{ fontSize: '0.8rem', color: 'var(--peacock-green)', fontWeight: 700, margin: '0 0 0.4rem 0' }}>{job.companies?.name || job.company}</p>
                                                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                                                             <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', background: 'var(--bg-elevated)', padding: '0.2rem 0.55rem', borderRadius: 20, border: '1px solid var(--border-color)' }}>
                                                                 📍 {job.location || 'Remote'}

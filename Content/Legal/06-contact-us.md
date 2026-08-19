@@ -19,8 +19,8 @@ We aim to respond to all general inquiries within 24-48 hours on business days.
 
 **Registered Office Address:**
 Chavee
-Adimaparambil House, Ponmundam PO, Ponmundam
-Tirur, Kerala 676106, India
+2nd Floor, West End Tower, T. P. Road, Calicut
+Kerala - 673004, India
 
 **Business Hours:** Monday - Saturday, 10:00 AM - 6:00 PM IST
 
@@ -93,6 +93,6 @@ Thank you for being part of the Chavee community.
 ---
 
 **Chavee**
-Adimaparambil House, Ponmundam PO, Ponmundam
-Tirur, Kerala 676106, India
+2nd Floor, West End Tower, T. P. Road, Calicut
+Kerala - 673004, India
 Email: info@chavee.in

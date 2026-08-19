@@ -111,6 +111,14 @@ export default function ChatWindow({
 
     if (loadingMsgs) return <ChatWindowSkeleton />;
 
+    // URGENT fix: gig conversations are exempt from the connection-request reply
+    // gate entirely — this gate was silently locking real paid gig threads (the
+    // applicant/poster pair aren't necessarily "Connected" via the separate Peers
+    // system, and there's no reason a real gig contract's messaging should depend
+    // on that). conversation.isGigConversation comes from Messages.jsx's batched
+    // gig_applications lookup, same signal the Gig Rooms tab split already uses.
+    const isLockedForReply = !conversation.isGigConversation && !conversation.isConnection && conversation.lastMsg?.sender_id !== user.id;
+
     const formatTime = (dateStr) => {
         if (!dateStr) return '';
         return new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -222,7 +230,7 @@ export default function ChatWindow({
             )}
 
             {/* Request Action Bar */}
-            {!conversation.isConnection && conversation.lastMsg?.sender_id !== user.id && (
+            {isLockedForReply && (
                 <div className="bg-white p-4 shadow-sm z-10 border-b border-gray-200 shrink-0">
                     <div className="text-sm font-medium text-gray-800 mb-3 text-center">
                         {peer.full_name || peer.username} is not in your connections. Accept their request to reply.
@@ -230,7 +238,10 @@ export default function ChatWindow({
                     <div className="flex justify-center gap-3">
                         <button onClick={onAcceptRequest} className="px-6 py-2 bg-[#059669] hover:bg-emerald-700 text-white rounded-full text-sm font-bold shadow-sm transition-all transform active:scale-95">Accept Connection</button>
                         <button onClick={onIgnoreRequest} className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full text-sm font-bold transition-all transform active:scale-95">Ignore</button>
-                        <button onClick={onBlockRequest} className="px-6 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-full text-sm font-bold transition-all transform active:scale-95">Block</button>
+                        {/* Real blocking isn't built yet (onBlockRequest is a stub that only
+                            hides the conversation locally) — disabled + labeled honestly
+                            instead of looking like a working action. */}
+                        <button disabled title="Coming soon" className="px-6 py-2 bg-gray-50 text-gray-400 rounded-full text-sm font-bold cursor-not-allowed">Block (Coming soon)</button>
                     </div>
                 </div>
             )}
@@ -317,8 +328,8 @@ export default function ChatWindow({
                             value={text} 
                             onChange={handleInput} 
                             onKeyDown={handleKeyDown}
-                            placeholder={!conversation.isConnection && conversation.lastMsg?.sender_id !== user.id ? "Accept request to reply..." : "Type a message..."}
-                            disabled={sending || (!conversation.isConnection && conversation.lastMsg?.sender_id !== user.id)}
+                            placeholder={isLockedForReply ? "Accept request to reply..." : "Type a message..."}
+                            disabled={sending || isLockedForReply}
                             rows={1}
                             className="flex-1 bg-transparent border-none px-4 py-3 text-[0.95rem] text-gray-800 placeholder-gray-400 focus:ring-0 outline-none resize-none max-h-[120px] scrollbar-thin overflow-y-auto leading-snug"
                         />
@@ -330,7 +341,7 @@ export default function ChatWindow({
                     <button 
                         type="button" 
                         onClick={handleSend} 
-                        disabled={sending || (!text.trim() && !attachment) || (!conversation.isConnection && conversation.lastMsg?.sender_id !== user.id)}
+                        disabled={sending || (!text.trim() && !attachment) || isLockedForReply}
                         className={`w-[48px] h-[48px] rounded-full flex items-center justify-center shrink-0 mb-0.5 transition-all duration-200 transform ${
                             (text.trim() || attachment) 
                             ? 'bg-[#059669] text-white hover:bg-emerald-700 shadow-md active:scale-95' 

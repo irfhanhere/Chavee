@@ -3,23 +3,7 @@ import Navbar from '../components/Navbar.jsx';
 import Footer from '../components/Footer.jsx';
 import { ChaveeLogo } from '../Logo.jsx';
 import { supabase } from '../supabaseClient.js';
-
-const DEFAULT_PRESS = [
-    {
-        id: 'pr-1',
-        title: 'Chavee Rolls Out Live Interactive Language Courses with Native Tutors Across Kerala',
-        summary: 'Chavee announced a major upgrade to its Education Tab, featuring structured courses in Korean, German, and Spanish tailored specifically for Indian students.',
-        created_at: '2026-07-10T10:00:00Z',
-        status: 'published'
-    },
-    {
-        id: 'pr-2',
-        title: 'Chavee Surpasses Core Onboarding Milestones as the Premier Gen Z Student Marketplace Launch Approaches',
-        summary: 'With thousands of students registering across colleges, Chavee announces its zero-commission student marketplace to facilitate gig work and textbook exchange.',
-        created_at: '2026-06-18T14:30:00Z',
-        status: 'published'
-    }
-];
+import SEO from '../components/SEO.jsx';
 
 export default function PressKit() {
     const [releases, setReleases] = useState([]);
@@ -36,19 +20,10 @@ export default function PressKit() {
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            if (data && data.length > 0) {
-                setReleases(data);
-            } else {
-                setReleases(DEFAULT_PRESS);
-            }
+            setReleases(data || []);
         } catch (err) {
-            console.warn('Could not load press releases from database, checking local:', err.message);
-            const local = localStorage.getItem('chavee_press_releases');
-            if (local) {
-                setReleases(JSON.parse(local).filter(r => r.published !== false));
-            } else {
-                setReleases(DEFAULT_PRESS);
-            }
+            console.warn('Could not load press releases:', err.message);
+            setReleases([]);
         } finally {
             setLoading(false);
         }
@@ -56,12 +31,17 @@ export default function PressKit() {
 
     useEffect(() => {
         loadPress();
-        document.title = 'Chavee Press & Media Kit | Learn Earn Network Belong';
     }, []);
 
     const handleDownloadLogo = () => {
-        // Mock download logo
-        alert('🎨 Downloading Chavee Brand Assets Package (SVG, PNG, Branding Guidelines)...');
+        // Real asset — the only logo file that actually exists in public/ today
+        // (no SVG/branding-guidelines package exists yet, so we don't claim one).
+        const link = document.createElement('a');
+        link.href = '/logo.png';
+        link.download = 'chavee-logo.png';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     };
 
     const S = {
@@ -90,6 +70,11 @@ export default function PressKit() {
 
     return (
         <div style={{ background: 'var(--bg-base)', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+            <SEO
+                title="Chavee Press & Media Kit | Learn Earn Network Belong"
+                description="Press releases, brand assets, and media resources for journalists and partners covering Chavee, India's first student social platform."
+                path="/press"
+            />
             <Navbar />
 
             {/* Hero */}
@@ -118,7 +103,7 @@ export default function PressKit() {
                             <ChaveeLogo height={32} />
                         </div>
                         <button onClick={handleDownloadLogo} className="btn-primary" style={{ width: '100%', padding: '0.7rem', borderRadius: 10, fontSize: '0.84rem' }}>
-                            📥 Download Logo Assets
+                            📥 Download Logo (PNG)
                         </button>
                     </div>
 
@@ -152,7 +137,7 @@ export default function PressKit() {
                             </div>
                         ) : releases.length === 0 ? (
                             <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.86rem', padding: '1rem', fontStyle: 'italic' }}>
-                                No announcements yet.
+                                No official press releases yet — check back soon.
                             </div>
                         ) : (
                             releases.map((pr) => (

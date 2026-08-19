@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient.js';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { ButtonSpinner } from '../../components/Spinner.jsx';
 import Toast, { useToast } from '../../components/Toast.jsx';
+import { usePresence } from '../../hooks/usePresence.js';
 
 export default function ConnectPeersTab({ user }) {
     const navigate = useNavigate();
     const { toast, showToast } = useToast();
-    
+    const { onlineUsers } = usePresence(); // real global presence channel, already used in Messages.jsx
+
     const [students, setStudents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filterQuery, setFilterQuery] = useState('');
@@ -103,23 +105,10 @@ export default function ConnectPeersTab({ user }) {
         fetchStudentsAndConnections();
     }, [user]);
 
-    const handleConnect = async (studentId) => {
-        if (!user) return;
-        setActionLoadingId(studentId);
-        try {
-            const { data, error } = await supabase.from('connection_requests').insert({
-                sender_id: user.id,
-                receiver_id: studentId,
-                status: 'pending'
-            }).select().single();
-            if (error) throw error;
-            setRequestsSent(prev => [...prev, data]);
-            showToast('Connection request sent!', 'success');
-        } catch (err) {
-            showToast('Failed to connect', 'error');
-        }
-        setActionLoadingId(null);
-    };
+    // Sending a new connection request no longer happens from this list —
+    // Profile.jsx already has its own full Connect flow (handleConnect,
+    // same connection_requests insert) for whoever's profile you land on.
+    // Removed the duplicate handleConnect here rather than leave it dead.
 
     const handleAccept = async (studentId) => {
         setActionLoadingId(studentId);
@@ -167,29 +156,10 @@ export default function ConnectPeersTab({ user }) {
         setActionLoadingId(null);
     };
 
-    const handleMessage = async (studentId) => {
-        if (!user) return;
-        
-        // Ensure they are connected first
-        if (!connections.includes(studentId)) {
-            if (confirm("You need to connect with this user before messaging them. Send a connection request now?")) {
-                handleConnect(studentId);
-            }
-            return;
-        }
-
-        setActionLoadingId(studentId);
-        try {
-            const { data: conversationId, error } = await supabase.rpc('start_direct_conversation', {
-                other_user_id: studentId
-            });
-            if (error) throw error;
-            if (conversationId) navigate(`/messages?conversation=${conversationId}`);
-        } catch (err) {
-            showToast('Failed to start chat', 'error');
-        }
-        setActionLoadingId(null);
-    };
+    // Messaging is no longer initiated from this list — tapping a row opens
+    // the real profile page, which already has its own working Message
+    // button (Profile.jsx, same start_direct_conversation RPC). Removed the
+    // old inline handleMessage here rather than leave it dead.
 
     const getConnectionStatus = (studentId) => {
         if (connections.includes(studentId)) return 'connected';
@@ -284,21 +254,29 @@ export default function ConnectPeersTab({ user }) {
                             {displayStudents.length} students found
                         </p>
                         
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.25rem' }}>
-                            {displayStudents.map(student => (
-                                <StudentCard 
-                                    key={student.id} 
-                                    student={student} 
-                                    status={getConnectionStatus(student.id)}
-                                    isLoading={actionLoadingId === student.id}
-                                    onConnect={() => handleConnect(student.id)}
-                                    onAccept={() => handleAccept(student.id)}
-                                    onDecline={() => handleDecline(student.id)}
-                                    onCancel={() => handleCancel(student.id)}
-                                    onMessage={() => handleMessage(student.id)}
-                                />
-                            ))}
-                        </div>
+                        {displayStudents.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '3rem 2rem', background: 'var(--bg-surface)', border: '1px dashed var(--border-color)', borderRadius: 16, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                {activeTab === 'My Connections' && "You haven't connected with anyone yet."}
+                                {activeTab === 'Pending Requests' && "No pending requests right now."}
+                                {activeTab === 'Discover' && "No students found."}
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, overflow: 'hidden' }}>
+                                {displayStudents.map((student, i) => (
+                                    <StudentListRow
+                                        key={student.id}
+                                        student={student}
+                                        status={getConnectionStatus(student.id)}
+                                        isLoading={actionLoadingId === student.id}
+                                        isOnline={onlineUsers.has(student.id)}
+                                        isLast={i === displayStudents.length - 1}
+                                        onAccept={() => handleAccept(student.id)}
+                                        onDecline={() => handleDecline(student.id)}
+                                        onCancel={() => handleCancel(student.id)}
+                                    />
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -347,94 +325,94 @@ function FilterSelect({ label, options }) {
     );
 }
 
-function StudentCard({ student, status, isLoading, onConnect, onAccept, onDecline, onCancel, onMessage }) {
+// List row — replaces the old card grid. The whole row navigates to the
+// real profile page on tap (per redesign brief: messaging + connect both
+// live there now, not inline in this list). Accept/Decline/Cancel are kept
+// as inline buttons (stopPropagation'd so they don't also trigger the row
+// navigation) because they're real connection-request management, not the
+// Connect/Chat actions the redesign asked to remove — dropping them would
+// leave Pending Requests with no way to respond at all.
+function StudentListRow({ student, status, isLoading, isOnline, isLast, onAccept, onDecline, onCancel }) {
+    const navigate = useNavigate();
     const avatarLetter = (student.full_name || student.username || '?')[0].toUpperCase();
-    
+    const skills = Array.isArray(student.skills) ? student.skills.filter(Boolean) : [];
+
+    const goToProfile = () => navigate(`/profile/${student.username || student.id}`);
+    const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
+
     return (
-        <div style={{
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 16,
-            padding: '1.25rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '1rem'
-        }}>
-            <Link to={`/profile/${student.username || student.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                    <div style={{ flexShrink: 0, position: 'relative' }}>
-                        {student.avatar_url ? (
-                            <img src={student.avatar_url} alt="Avatar" style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover' }} />
-                        ) : (
-                            <div style={{
-                                width: 48, height: 48, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-primary)', fontWeight: 800, fontSize: '1.2rem'
-                            }}>
-                                {avatarLetter}
-                            </div>
-                        )}
-                    </div>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {student.full_name || student.username}
-                            </h4>
-                        </div>
-                        <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {student.college || 'Student'}
-                        </p>
-                    </div>
-                </div>
-            </Link>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                {student.course && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <span>📚</span> <span>{student.course}</span>
+        <div
+            onClick={goToProfile}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => { if (e.key === 'Enter') goToProfile(); }}
+            style={{
+                display: 'flex', alignItems: 'center', gap: '0.85rem', padding: '0.9rem 1.1rem',
+                borderBottom: isLast ? 'none' : '1px solid var(--border-color)',
+                cursor: 'pointer', transition: 'background 0.15s'
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'none'}
+        >
+            <div style={{ flexShrink: 0, position: 'relative' }}>
+                {student.avatar_url ? (
+                    <img src={student.avatar_url} alt="Avatar" style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover' }} />
+                ) : (
+                    <div style={{
+                        width: 48, height: 48, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-primary)', fontWeight: 800, fontSize: '1.2rem'
+                    }}>
+                        {avatarLetter}
                     </div>
                 )}
-                {/* Mock Mutual Connections for MVP */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span style={{ color: 'var(--emerald)' }}>●</span> <span>Active recently</span>
-                </div>
+                {isOnline && (
+                    <span title="Online now" style={{
+                        position: 'absolute', bottom: 1, right: 1, width: 11, height: 11, borderRadius: '50%',
+                        background: 'var(--emerald)', border: '2px solid var(--bg-surface)'
+                    }} />
+                )}
             </div>
-            
-            <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem' }}>
-                <button 
-                    onClick={onMessage}
-                    style={{ flex: 1, padding: '0.55rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem' }}
-                >
-                    💬 Message
-                </button>
-                
-                {status === 'none' && (
-                    <button onClick={onConnect} disabled={isLoading} style={{ flex: 1, padding: '0.55rem', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--peacock-green)', color: '#fff', border: 'none' }}>
-                        {isLoading ? <ButtonSpinner label="..." /> : 'Connect'}
-                    </button>
-                )}
-                
-                {status === 'pending_sent' && (
-                    <button onClick={onCancel} disabled={isLoading} style={{ flex: 1, padding: '0.55rem', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
-                        {isLoading ? <ButtonSpinner label="..." /> : 'Cancel'}
-                    </button>
-                )}
 
+            <div style={{ minWidth: 0, flex: 1 }}>
+                <h4 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {student.full_name || student.username}
+                </h4>
+                <p style={{ margin: '0.1rem 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {[student.college, student.course].filter(Boolean).join(' · ') || 'Student'}
+                </p>
+                {skills.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.4rem' }}>
+                        {skills.slice(0, 3).map(s => (
+                            <span key={s} style={{ fontSize: '0.68rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 20, background: 'var(--bg-mint)', color: 'var(--peacock-green)' }}>
+                                {s}
+                            </span>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 {status === 'pending_received' && (
                     <>
-                        <button onClick={onAccept} disabled={isLoading} style={{ flex: 1, padding: '0.55rem', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--peacock-green)', color: '#fff', border: 'none' }}>
+                        <button onClick={stop(onAccept)} disabled={isLoading} style={{ padding: '0.45rem 0.8rem', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', background: 'var(--peacock-green)', color: '#fff', border: 'none' }}>
                             {isLoading ? <ButtonSpinner label="..." /> : 'Accept'}
                         </button>
-                        <button onClick={onDecline} disabled={isLoading} style={{ padding: '0.55rem', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
+                        <button onClick={stop(onDecline)} disabled={isLoading} style={{ padding: '0.45rem 0.8rem', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
                             Decline
                         </button>
                     </>
                 )}
-
-                {status === 'connected' && (
-                    <button disabled style={{ flex: 1, padding: '0.55rem', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-mint)', color: 'var(--peacock-green)', border: '1px solid var(--border-mint)' }}>
-                        Connected
+                {status === 'pending_sent' && (
+                    <button onClick={stop(onCancel)} disabled={isLoading} style={{ padding: '0.45rem 0.8rem', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
+                        {isLoading ? <ButtonSpinner label="..." /> : 'Requested'}
                     </button>
                 )}
+                {status === 'connected' && (
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '0.3rem 0.6rem', borderRadius: 20, background: 'var(--bg-mint)', color: 'var(--peacock-green)', border: '1px solid var(--border-mint)' }}>
+                        Connected
+                    </span>
+                )}
+                <span style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>›</span>
             </div>
         </div>
     );

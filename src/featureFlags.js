@@ -3,10 +3,11 @@
 // feature-flag framework, just a couple of named constants to gate the
 // specific spots that need it.
 
-// Cashfree vendor onboarding (cashfree-create-vendor) has no local source
-// anymore (deleted in e8fc787 — Payouts confirmed unavailable on our
-// Individual Cashfree account) but the deployed function is still reachable,
-// and PayoutSetupForm.jsx still calls it. Locked business decision: payouts
+// Cashfree vendor onboarding (cashfree-create-vendor) is real, deployed,
+// and has full local source (supabase/functions/cashfree-create-vendor/)
+// — it was never deleted. It's unreachable today purely because this flag
+// is false, gating both call sites below; nothing else stands in the way.
+// PayoutSetupForm.jsx still calls it. Locked business decision: payouts
 // stay manual bank/UPI transfer until Chavee Technologies LLP registers
 // (~early October). Gates both places that would otherwise show the
 // PayoutSetupForm — Messages.jsx's automatic "Complete Payout Setup" modal,

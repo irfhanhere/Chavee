@@ -2,12 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient.js';
 import HeaderActions from '../../components/HeaderActions.jsx';
+import SEO from '../../components/SEO.jsx';
 
 const NAV = [
     { path: '/admin',              icon: '📊', label: 'Overview' },
     { path: '/admin/communities',  icon: '🏘️', label: 'Communities' },
     { path: '/admin/posts',        icon: '📝', label: 'Posts' },
     { path: '/admin/content',      icon: '📚', label: 'Content' },
+    { path: '/admin/testimonials', icon: '💬', label: 'Testimonials' },
     { 
       label: 'Education', 
       icon: '🎓', 
@@ -20,13 +22,18 @@ const NAV = [
       ]
     },
     { path: '/admin/jobs',         icon: '💼', label: 'Jobs' },
+    { path: '/admin/companies',    icon: '🏢', label: 'Companies' },
     { path: '/admin/gigs',         icon: '⚡', label: 'Gigs' },
     // Separate path (not /admin/gigs/...) on purpose — isActive() below uses
     // startsWith(), so a nested path would light up both nav items at once.
     { path: '/admin/gig-moderation', icon: '🛡️', label: 'Gig Moderation' },
+    { path: '/admin/contracts', icon: '📄', label: 'Contracts' },
+    { path: '/admin/disputes', icon: '⚠️', label: 'Disputes' },
+    { path: '/admin/withdrawals', icon: '💸', label: 'Withdrawals' },
     { path: '/admin/events',       icon: '🎪', label: 'Events' },
     { path: '/admin/users',        icon: '👥', label: 'Users' },
     { path: '/admin/reports',      icon: '🚩', label: 'Reports' },
+    { path: '/admin/support-tickets', icon: '🎫', label: 'Issue Reports' },
     { path: '/admin/subscribers',  icon: '🔔', label: 'Waitlists' },
 ];
 
@@ -249,6 +256,8 @@ export default function AdminShell({ children }) {
 
     return (
         <div style={{ minHeight: '100vh', background: 'var(--bg-base)', color: 'var(--text-primary)', display: 'flex' }}>
+            {/* Every /admin/* route requires admin login — never indexable. */}
+            <SEO noindex />
             <style>{ANIMATIONS}</style>
 
             {/* Desktop sidebar */}

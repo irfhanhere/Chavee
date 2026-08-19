@@ -7,6 +7,7 @@ import { getLevelDetails, TIER_CONFIG } from '../hooks/useProfile.js';
 import { logUserActivity } from '../utils/activityLogger.js';
 import SaveButton from '../components/SaveButton.jsx';
 import NotifyMeButton from '../components/NotifyMeButton.jsx';
+import { useIsMobile } from '../hooks/useIsMobile.js';
 
 /* ── No hardcoded seed data — everything comes from Supabase ── */
 
@@ -74,21 +75,6 @@ const ALL_SCHOLARSHIPS = [
         incomeLimit: 600000,
         applyUrl: 'https://www.loreal.com',
     }
-];
-
-const MOCK_SEARCH_ITEMS = [
-    { type: 'Job', title: 'React Frontend Developer Intern', category: 'Jobs', desc: 'Remote, Stipend: ₹15,000/mo', link: '/earn' },
-    { type: 'Job', title: 'Campus Brand Ambassador', category: 'Jobs', desc: 'Part-time, Commission based', link: '/earn' },
-    { type: 'Course', title: 'Korean Language (Level 1)', category: 'Courses', desc: 'K-Pop & Culture focus, ₹0', link: '/learn' },
-    { type: 'Course', title: 'Japanese Conversational N5', category: 'Courses', desc: 'By native speakers, ₹1,200', link: '/learn' },
-    { type: 'Scholarship', title: 'Reliance Foundation UG Scholarship', category: 'Scholarships', desc: 'Stipend up to ₹2 Lakhs', link: 'scholarships' },
-    { type: 'Scholarship', title: 'Aditya Birla Capital Scholarship', category: 'Scholarships', desc: 'For professional course students', link: 'scholarships' },
-    { type: 'Event', title: 'Developer Workation Goa 🌊', category: 'Events', desc: 'Jul 25-28, Goa stay included', link: 'events' },
-    { type: 'Event', title: 'AI & Prompt Engineering Workshop', category: 'Events', desc: 'Free online webinar', link: 'events' },
-    { type: 'People', title: 'Aravind K. (Google Mentor)', category: 'People', desc: 'CET Trivandrum alumnus, Tech Mentor', link: '/network' },
-    { type: 'People', title: 'Meera Nair (UI/UX Designer)', category: 'People', desc: 'NIT Calicut, freelancing lead', link: '/network' },
-    { type: 'Post', title: 'Goa Hackathon Prep 🚀', category: 'Posts', desc: 'Finalizing pitch decks and demo prototype...', link: 'home' },
-    { type: 'Post', title: 'Textbook Exchange CUSAT', category: 'Posts', desc: 'Selling 3rd sem CS books for half price...', link: '/earn' },
 ];
 
 const renderAvatar = (avatarData, name, size = 34, fontSize = '0.9rem') => {
@@ -404,6 +390,7 @@ export default function Dashboard() {
     const navigate = useNavigate();
     const { toast, showToast, hideToast } = useToast();
     const fileInputRef = useRef(null);
+    const feedTabsRef = useRef(null); // mobile Announcements-preview "View all" scrolls here
 
     const [user, setUser] = useState(null);
     const [sessionLoading, setSessionLoading] = useState(true);
@@ -429,7 +416,12 @@ export default function Dashboard() {
     const [registeringEventId, setRegisteringEventId] = useState(null);
 
     // Onboarding popup
+    const isMobile = useIsMobile();
     const [showOnboardingPopup, setShowOnboardingPopup] = useState(false);
+    // Mobile-only: mirrors Home-after-signup.png's two-step flow (teaser →
+    // full form) using this same modal's real fields — desktop keeps the
+    // existing single-step modal untouched, gated below by isMobile.
+    const [onboardingMobileStep, setOnboardingMobileStep] = useState('teaser'); // 'teaser' | 'form'
     const [college, setCollege] = useState('');
     const [dob, setDob] = useState('');
     const [interests, setInterests] = useState([]);
@@ -446,8 +438,6 @@ export default function Dashboard() {
     // Social feed states
     const [posts, setPosts] = useState(INITIAL_POSTS);
     const [newPostText, setNewPostText] = useState('');
-    const [searchQuery, setSearchQuery] = useState('');
-    const [showSearchResults, setShowSearchResults] = useState(false);
     const [sharePost, setSharePost] = useState(null);
     const [connectedFriends, setConnectedFriends] = useState([]);
     const [sharingToFriendId, setSharingToFriendId] = useState(null);
@@ -593,6 +583,7 @@ export default function Dashboard() {
             setDob(profile.dob || '');
             setInterests(profile.interests || []);
             setMotive(profile.motive || '');
+            setOnboardingMobileStep('teaser');
             setShowOnboardingPopup(true);
         }, 1500);
         return () => clearTimeout(t);
@@ -1461,7 +1452,7 @@ export default function Dashboard() {
             {profile && !profile.onboarding_completed && !profile.college && activeTab === 'home' && (
                 <div className="profile-banner" style={{ background: 'var(--bg-mint)', border: 'none', borderBottom: '1px solid var(--border-mint)', padding: '0.75rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.84rem', color: 'var(--peacock-green)' }}>
                     <span>🧭 <strong>Incomplete Profile:</strong> Complete onboarding to earn <strong>+50 XP</strong> and unlock Silver tier!</span>
-                    <button onClick={() => { setCollege(profile.college || ''); setDob(profile.dob || ''); setInterests(profile.interests || []); setMotive(profile.motive || ''); setShowOnboardingPopup(true); }}
+                    <button onClick={() => { setCollege(profile.college || ''); setDob(profile.dob || ''); setInterests(profile.interests || []); setMotive(profile.motive || ''); setOnboardingMobileStep('teaser'); setShowOnboardingPopup(true); }}
                         style={{ background: 'var(--peacock-green)', color: '#fff', border: 'none', borderRadius: 8, padding: '0.35rem 0.85rem', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}>
                         Complete Now
                     </button>
@@ -1486,8 +1477,99 @@ export default function Dashboard() {
                                         </h2>
                                     </div>
 
+                                    {/* Mobile-only: Upcoming Event banner + Announcements preview + Recent
+                                        Activity preview. Desktop shows the same underlying data in the
+                                        right-sidebar widgets below (.hidden-tablet) — this is the opposite
+                                        toggle (.mobile-home-widgets, index.css) so nothing renders twice. */}
+                                    <div className="mobile-home-widgets" style={{ flexDirection: 'column', gap: '1.25rem' }}>
+                                        {/* Upcoming Event banner — real data, upcomingEvents[0], already
+                                            fetched by fetchUpcomingEvents. No carousel (locked decision) —
+                                            single card, "View all" links to /events.
+                                            Register Now deliberately does NOT call this file's own
+                                            handleRegisterEvent/registrations — verified live that both are
+                                            dead code: they read/write a table named "user_events", which
+                                            does not exist in the schema (confirmed via a live query — 42P01/
+                                            PGRST205 "Could not find the table"). The real, working
+                                            registration flow lives in EventDetail.jsx against the real
+                                            event_registrations table (confirmed the same way, and per this
+                                            project's memory: "already fully wired and functional — don't
+                                            touch its logic"). So Register Now links straight to that real
+                                            flow instead of reusing this file's broken inline action. */}
+                                        {upcomingEvents.length > 0 && (() => {
+                                            const ev = upcomingEvents[0];
+                                            const dateLabel = new Date(ev.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+                                            const timeLabel = new Date(ev.event_date).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+                                            return (
+                                                <div style={{ background: 'linear-gradient(135deg, #115E59 0%, #0B3B36 100%)', borderRadius: 16, padding: '1.25rem', color: '#fff', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                                    <span style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.6px', opacity: 0.85 }}>Upcoming Event</span>
+                                                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, lineHeight: 1.3 }}>{ev.title}</h3>
+                                                    <span style={{ fontSize: '0.8rem', opacity: 0.9 }}>{dateLabel} • {timeLabel}</span>
+                                                    <div style={{ display: 'flex', gap: '1rem', marginTop: '0.6rem', alignItems: 'center' }}>
+                                                        <Link
+                                                            to={`/events/${ev.slug || ev.id}`}
+                                                            style={{ background: '#F5A623', color: '#1A1A1A', border: 'none', borderRadius: 10, padding: '0.6rem 1.25rem', fontWeight: 700, fontSize: '0.85rem', textDecoration: 'none', display: 'inline-block' }}
+                                                        >
+                                                            Register Now
+                                                        </Link>
+                                                        <Link to="/events" style={{ color: '#fff', fontSize: '0.8rem', fontWeight: 700, textDecoration: 'underline', textUnderlineOffset: 3 }}>View all</Link>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {/* Announcements preview — real admin-authored posts, already
+                                            computed by the same rule the Announcements feed tab uses
+                                            (adminIds.has(p.author_id)). No new fetch. */}
+                                        {(() => {
+                                            const announcementPosts = posts.filter(p => adminIds.has(p.author_id)).slice(0, 3);
+                                            if (announcementPosts.length === 0) return null;
+                                            return (
+                                                <div style={S.card}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+                                                        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800 }}>Announcements</h3>
+                                                        <button
+                                                            onClick={() => { setFeedTab('Announcements'); feedTabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
+                                                            style={{ background: 'none', border: 'none', color: 'var(--peacock-green)', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                                                        >
+                                                            View all
+                                                        </button>
+                                                    </div>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                                        {announcementPosts.map(p => (
+                                                            <div key={p.id} style={{ display: 'flex', gap: '0.65rem', alignItems: 'flex-start' }}>
+                                                                <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>📢</span>
+                                                                <div style={{ minWidth: 0 }}>
+                                                                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{p.content}</div>
+                                                                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>{p.time}</div>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {/* Recent Activity — honest coming-soon placeholder, no fetch. The
+                                            real backing table (user_activity) has RLS blocking both reads
+                                            AND writes right now (confirmed live: a self-row insert as an
+                                            authenticated user returns 42501, RLS policy violation) — nothing
+                                            can be queried from it truthfully yet. Fixing that RLS is a
+                                            separate task; this stays a placeholder until it's done, same
+                                            dashed-card pattern as the Featured Platform Releases cards below
+                                            and PayoutTab.jsx/SettingsTab.jsx's coming-soon treatment. */}
+                                        <div style={{ ...S.card, borderRadius: 20, padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', border: '1px dashed var(--border-mint)', background: 'linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-mint) 100%)' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <span style={{ fontSize: '1.5rem' }}>⚡</span>
+                                                <span style={{ fontSize: '0.65rem', background: 'var(--peacock-green)', color: '#fff', fontWeight: 800, padding: '0.15rem 0.5rem', borderRadius: 12 }}>COMING SOON</span>
+                                            </div>
+                                            <h4 style={{ fontSize: '0.94rem', fontWeight: 800, margin: 0 }}>Recent Activity</h4>
+                                            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>See what people across Chavee are posting, joining, and celebrating — right here on Home.</p>
+                                            <NotifyMeButton user={user} featureKey="recent_activity" fullWidth style={{ marginTop: 'auto' }} />
+                                        </div>
+                                    </div>
+
                                     {/* Feed Filter Tabs */}
-                                    <div className="feed-tabs-scroll" style={{ display: 'flex', gap: '1.5rem', overflowX: 'auto', paddingBottom: '0.2rem', borderBottom: '1px solid var(--border-color)', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch', marginBottom: '0.5rem' }}>
+                                    <div ref={feedTabsRef} className="feed-tabs-scroll" style={{ display: 'flex', gap: '1.5rem', overflowX: 'auto', paddingBottom: '0.2rem', borderBottom: '1px solid var(--border-color)', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch', marginBottom: '0.5rem' }}>
                                         {['For You', 'Following', 'Trending', 'Jobs', 'Events', 'Announcements'].map(tab => (
                                             <button
                                                 key={tab}
@@ -2073,7 +2155,9 @@ export default function Dashboard() {
             </div>
 
             {/* ── ONBOARDING POPUP ─────────────────────────────────── */}
-            {showOnboardingPopup && (
+            {/* Desktop — existing single-step modal, completely untouched. Mobile
+                gets its own two-step version below (same fields, same handlers). */}
+            {showOnboardingPopup && !isMobile && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.15)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '1rem' }}>
                     <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 20, width: 480, maxWidth: '100%', padding: '2rem', animation: 'modalEntrance 0.35s ease-out', boxShadow: 'var(--shadow-lg)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
@@ -2133,6 +2217,121 @@ export default function Dashboard() {
                     </div>
                 </div>
             )}
+
+            {/* Mobile — two-step flow matching Home-after-signup.png (teaser →
+                full form), same real fields/handlers as the desktop modal above
+                (college, dob, interests, motive) — not the mockup's literal
+                field labels (Full Name/Course/Graduation Year) where those
+                don't correspond to what this form actually collects. */}
+            {showOnboardingPopup && isMobile && onboardingMobileStep === 'teaser' && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.15)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 10000, padding: '1rem' }}>
+                    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 20, width: '100%', padding: '1.75rem 1.5rem', animation: 'modalEntrance 0.35s ease-out', boxShadow: 'var(--shadow-lg)', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem' }}>
+                        <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--bg-mint)', border: '1px solid var(--border-mint)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem' }}>🧭</div>
+                        <h3 style={{ margin: '0.25rem 0 0', fontWeight: 900, fontSize: '1.1rem' }}>Complete your profile</h3>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.84rem', margin: 0, lineHeight: 1.5 }}>Help us know you better so we can personalize your Chavee experience.</p>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', width: '100%', margin: '0.75rem 0', textAlign: 'left' }}>
+                            {[
+                                { icon: '🎯', text: 'Get relevant opportunities' },
+                                { icon: '👥', text: 'Find the right communities' },
+                                { icon: '🤝', text: 'Connect with like-minded students' },
+                            ].map(item => (
+                                <div key={item.text} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                    <span>{item.icon}</span>{item.text}
+                                </div>
+                            ))}
+                        </div>
+
+                        <button onClick={() => setOnboardingMobileStep('form')} className="btn-primary" style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+                            Complete Profile
+                        </button>
+                        <button onClick={handleDismissOnboarding} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', padding: '0.5rem' }}>
+                            Skip for now
+                        </button>
+                    </div>
+                </div>
+            )}
+            {showOnboardingPopup && isMobile && onboardingMobileStep === 'form' && (() => {
+                const fieldCheck = (filled) => filled ? (
+                    <span style={{ color: 'var(--peacock-green)', fontWeight: 800 }}>✓</span>
+                ) : null;
+                return (
+                    <div style={{ position: 'fixed', inset: 0, background: 'var(--bg-surface)', zIndex: 10000, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
+                            <button onClick={() => setOnboardingMobileStep('teaser')} style={{ background: 'none', border: 'none', fontSize: '1.3rem', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem' }} aria-label="Back">←</button>
+                            <span style={{ fontWeight: 800, fontSize: '0.95rem' }}>Complete your profile</span>
+                            <button onClick={handleDismissOnboarding} style={{ background: 'none', border: 'none', fontSize: '1.3rem', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem' }} aria-label="Close">✕</button>
+                        </div>
+
+                        <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.1rem', flex: 1 }}>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', margin: 0 }}>This helps us show you the right content and opportunities.</p>
+
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                                    <label style={S.formLabel}>College / Institution</label>
+                                    {fieldCheck(!!college.trim())}
+                                </div>
+                                <input type="text" value={college} onChange={e => setCollege(e.target.value)} placeholder="e.g. BITS Pilani" className="dark-input" style={S.formInput} />
+                            </div>
+
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                                    <label style={S.formLabel}>Date of Birth</label>
+                                    {fieldCheck(!!dob)}
+                                </div>
+                                <input type="date" value={dob} onChange={e => setDob(e.target.value)} className="dark-input" style={S.formInput} />
+                            </div>
+
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                    <label style={S.formLabel}>Interests (pick multiple)</label>
+                                    {fieldCheck(interests.length > 0)}
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                    {['Learn', 'Earn', 'Network', 'Events', 'Mentoring', 'Freelancing', 'Languages', 'Tech'].map(tag => {
+                                        const sel = interests.includes(tag);
+                                        return (
+                                            <button key={tag} type="button" onClick={() => sel ? setInterests(interests.filter(t => t !== tag)) : setInterests([...interests, tag])}
+                                                style={{
+                                                    padding: '0.4rem 0.8rem', borderRadius: 20, border: '1px solid', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, transition: 'all 0.15s',
+                                                    background: sel ? 'var(--bg-mint)' : 'var(--bg-elevated)',
+                                                    borderColor: sel ? 'var(--border-mint)' : 'var(--border-color)',
+                                                    color: sel ? 'var(--peacock-green)' : 'var(--text-secondary)'
+                                                }}>
+                                                {tag} {sel && '✓'}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                                    <label style={S.formLabel}>Primary Goal on Chavee</label>
+                                    {fieldCheck(!!motive)}
+                                </div>
+                                <select value={motive} onChange={e => setMotive(e.target.value)} style={{ ...S.formInput, cursor: 'pointer', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', color: motive ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                                    <option value="">Choose your goal</option>
+                                    <option value="Find mentors">Find premium tech mentors</option>
+                                    <option value="Earn money">Earn money via gigs</option>
+                                    <option value="Meet people">Meet ambitious peers</option>
+                                    <option value="Attend events">Attend workations & events</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0 }}>
+                            <button onClick={handleSaveOnboarding} disabled={!college || !dob || !motive || interests.length === 0} className="btn-primary" style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem' }}>
+                                Save & Continue ✓
+                            </button>
+                            <button onClick={handleDismissOnboarding} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '0.84rem', cursor: 'pointer', textAlign: 'center', padding: '0.4rem' }}>
+                                Skip for now
+                            </button>
+                        </div>
+                    </div>
+                );
+            })()}
+
             {/* ── SCHOLARSHIP ELIGIBILITY MODAL ────────────────────── */}
             {showEligibilityModal && selectedScholarship && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.15)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '1rem' }}>

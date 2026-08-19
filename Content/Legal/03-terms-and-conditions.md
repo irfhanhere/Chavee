@@ -121,8 +121,8 @@ We may update these Terms from time to time. Material changes will be communicat
 For questions about these Terms, please contact:
 
 **Chavee**
-Adimaparambil House, Ponmundam PO, Ponmundam
-Tirur, Kerala 676106, India
+2nd Floor, West End Tower, T. P. Road, Calicut
+Kerala - 673004, India
 Email: info@chavee.in
 
 ---

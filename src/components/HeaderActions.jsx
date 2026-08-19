@@ -330,6 +330,22 @@ export default function HeaderActions({ user }) {
 
     return (
         <div className="header-actions-container" style={S.container}>
+            {/* Search Icon — reference position, before Messages/Notifications.
+                Real destination: /search (see App.jsx) — replaces the old
+                decorative desktop-only input and the unwired mobile gap. */}
+            <button
+                onClick={() => navigate('/search')}
+                style={S.iconBtn}
+                title="Search"
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-mint)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'none'}
+            >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.3-4.3"></path>
+                </svg>
+            </button>
+
             {/* Messages Icon */}
             <button
                 onClick={() => navigate('/messages')}

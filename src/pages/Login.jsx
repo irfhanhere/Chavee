@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Turnstile } from '@marsidev/react-turnstile';
 import { supabase } from '../supabaseClient.js';
 import { ChaveeLogo } from '../Logo.jsx';
 import { ButtonSpinner } from '../components/Spinner.jsx';
 import Toast, { useToast } from '../components/Toast.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
+import SEO from '../components/SEO.jsx';
 
 import { AuthLayout } from '../components/auth/AuthLayout.jsx';
 import { BrandPanel } from '../components/auth/BrandPanel.jsx';
@@ -36,6 +38,11 @@ export default function Login() {
     const [unverifiedEmail, setUnverifiedEmail] = useState('');
     const [resendLoading, setResendLoading] = useState(false);
     const [resendCooldown, setResendCooldown] = useState(0);
+
+    // Turnstile — see SignUp.jsx for the full rationale; same Dashboard-
+    // configured Bot and Abuse Protection, same options.captchaToken shape.
+    const [captchaToken, setCaptchaToken] = useState('');
+    const turnstileRef = useRef(null);
 
     // Resend Cooldown countdown
     useEffect(() => {
@@ -97,11 +104,13 @@ export default function Login() {
         setUnverifiedEmail(''); // reset any previous unverified state
         
         if (!email || !password) { showToast('Please enter your email and password.', 'warning'); return; }
+        if (!captchaToken) { showToast('Please complete the verification challenge.', 'warning'); return; }
         setLoading(true);
         try {
             const { data, error } = await supabase.auth.signInWithPassword({
                 email: email.trim().toLowerCase(),
                 password,
+                options: { captchaToken },
             });
             if (error) throw error;
 
@@ -122,7 +131,11 @@ export default function Login() {
             } else {
                 showToast(msg || 'Login failed. Please try again.', 'error');
             }
-        } finally { setLoading(false); }
+        } finally {
+            setLoading(false);
+            turnstileRef.current?.reset();
+            setCaptchaToken('');
+        }
     };
 
     /* ── Google Login ─────────────────────────────────────────── */
@@ -151,9 +164,15 @@ export default function Login() {
     ];
 
     return (
-        <AuthLayout 
+        <>
+        <SEO
+            title="Log In | Chavee"
+            description="Log in to Chavee to access your courses, gigs, communities, and events — India's first student social platform."
+            path="/login"
+        />
+        <AuthLayout
             leftPanel={
-                <BrandPanel 
+                <BrandPanel
                     heading={<>Welcome back<br/>to Chavee.</>}
                     subtitle="Continue your journey of learning, earning and building meaningful connections."
                     features={loginFeatures}
@@ -163,9 +182,13 @@ export default function Login() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
                     <ChaveeLogo height={32} light />
                     <div>
-                        <h1 style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '0.25rem', lineHeight: 1.1, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
+                        {/* Not a real <h1> — BrandPanel's heading is already the page's
+                            one real h1 (same text, desktop panel), and both exist in the
+                            DOM simultaneously (CSS-toggled by breakpoint, not conditionally
+                            rendered), so a second h1 here would be a real duplicate-h1 bug. */}
+                        <p style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '0.25rem', lineHeight: 1.1, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
                             Welcome back
-                        </h1>
+                        </p>
                         <p style={{ fontSize: '1rem', opacity: 0.9, color: '#DFF7EA', margin: 0 }}>
                             Sign in to continue your journey.
                         </p>
@@ -267,23 +290,33 @@ export default function Login() {
                         </Link>
                     </div>
 
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.25rem' }}>
+                        <Turnstile
+                            ref={turnstileRef}
+                            siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                            onSuccess={setCaptchaToken}
+                            onExpire={() => setCaptchaToken('')}
+                            onError={() => setCaptchaToken('')}
+                        />
+                    </div>
+
                     <motion.button
-                        whileHover={!(loading || googleLoading) ? { scale: 1.02, boxShadow: '0 8px 20px rgba(11,143,90,0.2)' } : {}}
-                        whileTap={!(loading || googleLoading) ? { scale: 0.98 } : {}}
+                        whileHover={!(loading || googleLoading || !captchaToken) ? { scale: 1.02, boxShadow: '0 8px 20px rgba(11,143,90,0.2)' } : {}}
+                        whileTap={!(loading || googleLoading || !captchaToken) ? { scale: 0.98 } : {}}
                         type="submit"
-                        disabled={loading || googleLoading}
-                        style={{ 
-                            width: '100%', 
-                            padding: '1rem', 
+                        disabled={loading || googleLoading || !captchaToken}
+                        style={{
+                            width: '100%',
+                            padding: '1rem',
                             background: '#0B8F5A',
                             color: '#FFFFFF',
-                            fontSize: '1.05rem', 
+                            fontSize: '1.05rem',
                             fontWeight: 700,
-                            borderRadius: '12px', 
+                            borderRadius: '12px',
                             border: 'none',
                             marginTop: '1rem',
-                            opacity: (loading || googleLoading) ? 0.7 : 1,
-                            cursor: (loading || googleLoading) ? 'not-allowed' : 'pointer',
+                            opacity: (loading || googleLoading || !captchaToken) ? 0.7 : 1,
+                            cursor: (loading || googleLoading || !captchaToken) ? 'not-allowed' : 'pointer',
                             boxShadow: '0 4px 10px rgba(11,143,90,0.1)'
                         }}
                     >
@@ -296,5 +329,6 @@ export default function Login() {
 
             <Toast {...toast} onHide={hideToast} />
         </AuthLayout>
+        </>
     );
 }

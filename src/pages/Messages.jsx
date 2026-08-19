@@ -28,6 +28,11 @@ export default function Messages() {
     const [searchQuery, setSearchQuery] = useState('');
     const [activeTab, setActiveTab] = useState('All');
     const [roomTab, setRoomTab] = useState('Chats'); // 'Chats' | 'Gig Rooms' — independent of the Connect/Request filter above
+    // Gig Room membership is derived dynamically from gig_applications, not conversations.type
+    // (confirmed live: neither handle_gig_proposal nor start_direct_conversation ever writes
+    // type='gig_room' — every conversation defaults to 'dm', so the type column can't
+    // distinguish them). Set of conversation ids with at least one linked gig_applications row.
+    const [gigConversationIds, setGigConversationIds] = useState(new Set());
 
     // Gig context
     const [gigContext, setGigContext] = useState(null);
@@ -56,6 +61,17 @@ export default function Messages() {
     const [deliveryMessage, setDeliveryMessage] = useState('');
     const [deliveryFile, setDeliveryFile] = useState(null);
     const [submittingDelivery, setSubmittingDelivery] = useState(false);
+
+    // Request revision state
+    const [revisionModal, setRevisionModal] = useState(null); // null | { contractId }
+    const [revisionNotes, setRevisionNotes] = useState('');
+    const [submittingRevision, setSubmittingRevision] = useState(false);
+
+    // Raise dispute state
+    const [disputeModal, setDisputeModal] = useState(null); // null | { contractId }
+    const [disputeCategory, setDisputeCategory] = useState('');
+    const [disputeDescription, setDisputeDescription] = useState('');
+    const [submittingDispute, setSubmittingDispute] = useState(false);
 
     // Store follow relationships for determining "Connections"
     const [connectionsData, setConnectionsData] = useState([]);
@@ -125,11 +141,26 @@ export default function Messages() {
 
             // Fetch conversations
             const { data: myConvs, error: e1 } = await supabase
-                .from('conversation_participants').select('conversation_id').eq('user_id', user.id);
+                .from('conversation_participants').select('conversation_id, hidden_at').eq('user_id', user.id);
             if (e1) throw e1;
-            
+
             const convIds = myConvs?.map(c => c.conversation_id) || [];
             if (convIds.length === 0) { setConversations([]); setLoadingConvs(false); return; }
+
+            // hidden_at is per-user (this row is the current user's own
+            // conversation_participants row) — set via the hide_conversation RPC
+            // (Delete conversation). Not a real deletion: messages, the other
+            // participant's view, and gig/connection state are untouched. A
+            // hidden conversation reappears automatically once the other person
+            // sends a new message after the hide (checked below, after lastMsg
+            // is fetched) — WhatsApp-style. There's no conversation-list realtime
+            // subscription in this app (confirmed — this function only runs on
+            // mount + a couple explicit actions), so a reappeared conversation
+            // shows up on the next visit/reload, not the instant the message
+            // arrives. That's existing app behavior, not something this changes.
+            const hiddenAtByConvId = Object.fromEntries(
+                (myConvs || []).map(c => [c.conversation_id, c.hidden_at])
+            );
 
             const { data: allPartsRaw, error: e2 } = await supabase
                 .from('conversation_participants')
@@ -143,6 +174,20 @@ export default function Messages() {
                 .in('id', convIds);
             if (e2b) throw e2b;
             const convTypeById = Object.fromEntries((convTypeRows || []).map(c => [c.id, c.type]));
+
+            // Gig Room membership — one batched query for the whole visible conversation
+            // list (not per-row), same underlying signal loadGigContext uses below, just
+            // checking existence rather than picking the most recent match.
+            const { data: gigAppRows, error: e2c } = await supabase
+                .from('gig_applications')
+                .select('conversation_id')
+                .in('conversation_id', convIds);
+            if (e2c) throw e2c;
+            // Local const, not the gigConversationIds state var — state updates from
+            // setGigConversationIds below won't be visible in this same synchronous
+            // pass, and `grouped` (below) needs this same set to derive isGigConversation.
+            const gigIdsSet = new Set((gigAppRows || []).map(r => r.conversation_id).filter(Boolean));
+            setGigConversationIds(gigIdsSet);
 
             const userIds = [...new Set(allPartsRaw?.map(p => p.user_id) || [])];
             
@@ -203,10 +248,23 @@ export default function Messages() {
                     unread,
                     updatedAt: lastMsg ? new Date(lastMsg.created_at).getTime() : 0,
                     isConnection,
+                    // Gig conversations are exempt from the connection-request reply
+                    // gate entirely (URGENT fix — this was actively locking real paid
+                    // gig threads). Checked via gig_applications existence, same as
+                    // the Gig Rooms tab split — NOT conversations.type, since only a
+                    // subset of real gig conversations have been backfilled to
+                    // type='gig_room' and no code path sets it on new ones.
+                    isGigConversation: gigIdsSet.has(cid),
                     type: convTypeById[cid] || 'dm'
                 };
+            }).filter(c => {
+                // Not hidden → always show. Hidden → only show again if the last
+                // real message came in after the hide timestamp.
+                const hiddenAt = hiddenAtByConvId[c.id];
+                if (!hiddenAt) return true;
+                return !!(c.lastMsg && new Date(c.lastMsg.created_at) > new Date(hiddenAt));
             }).sort((a, b) => b.updatedAt - a.updatedAt);
-            
+
             setConversations(grouped);
         } catch (err) {
             console.error('fetchConversations error:', err);
@@ -380,14 +438,29 @@ export default function Messages() {
             //    UI can reflect whether the buyer has paid, and where the delivery stands.
             let contractPaymentStatus = null;
             let contract = null;
+            let openDispute = null;
             if (activeOffer?.status === 'accepted') {
                 const { data: contractData } = await supabase
                     .from('gig_contracts')
-                    .select('id, payment_status, status, buyer_response_deadline, work_submitted_at, delivery_message, delivery_file_url')
+                    .select('id, payment_status, status, buyer_response_deadline, work_submitted_at, delivery_message, delivery_file_url, revisions_used, revision_notes')
                     .eq('gig_offer_id', activeOffer.id)
                     .single();
                 contract = contractData || null;
                 contractPaymentStatus = contract?.payment_status || null;
+
+                // disputes.status='open' is the sole signal for dispute state — gig_contracts
+                // is never touched by this feature, so this is a separate fetch, not a column
+                // on the contract row. raise_dispute enforces at most one open dispute per
+                // contract server-side, so .maybeSingle() rather than expecting an array.
+                if (contract) {
+                    const { data: disputeData } = await supabase
+                        .from('disputes')
+                        .select('id, category, description')
+                        .eq('gig_contract_id', contract.id)
+                        .eq('status', 'open')
+                        .maybeSingle();
+                    openDispute = disputeData || null;
+                }
             }
 
             setGigContext({
@@ -400,7 +473,8 @@ export default function Messages() {
                 allOffers: allOffers || [],
                 chainDepth,
                 contractPaymentStatus,
-                contract
+                contract,
+                openDispute
             });
             setShowCreateOffer(false);
         } catch (err) {
@@ -416,8 +490,8 @@ export default function Messages() {
     // Runs when gigContext is loaded and contains an accepted offer
     useEffect(() => {
         // Payouts are manual bank/UPI transfer until Chavee Technologies LLP registers —
-        // cashfree-create-vendor has no local source anymore and shouldn't be fronted by
-        // this modal. See featureFlags.js.
+        // cashfree-create-vendor is real and deployed, just deliberately not fronted by
+        // this modal while PAYOUTS_LIVE is false. See featureFlags.js.
         if (!PAYOUTS_LIVE) return;
         if (!gigContext || !user) return;
 
@@ -649,14 +723,17 @@ export default function Messages() {
                 }
             }
 
-            const { error } = await supabase
-                .from('gig_contracts')
-                .update({
-                    status: 'submitted',
-                    work_submitted_at: new Date().toISOString(),
-                    delivery_message: deliveryMessage.trim() || null,
-                })
-                .eq('id', deliveryModal.contractId);
+            // deliver_work is a SECURITY DEFINER RPC — seller-only, only permitted
+            // while status='in_progress', writes status/work_submitted_at/
+            // delivery_message server-side. Direct UPDATE on gig_contracts is now
+            // revoked from authenticated entirely (closes the column-tampering gap
+            // this table had — RLS was row-scoped only, not column-scoped), so
+            // this RPC is the only real write path left, same shape as
+            // request_revision.
+            const { error } = await supabase.rpc('deliver_work', {
+                p_contract_id: deliveryModal.contractId,
+                p_delivery_message: deliveryMessage.trim() || null,
+            });
             if (error) throw error;
 
             showToast('Work submitted! 🎉', 'success');
@@ -666,7 +743,9 @@ export default function Messages() {
             loadGigContext();
         } catch (err) {
             console.error('Error submitting work:', err);
-            showToast('Failed to submit work: ' + (err.message || 'Action failed'), 'error');
+            // Surface the RPC's own exception text as-is, same pattern as
+            // handleRequestRevision — no generic wrapper.
+            showToast(err.message || 'Failed to submit work', 'error');
         } finally {
             setSubmittingDelivery(false);
         }
@@ -674,10 +753,10 @@ export default function Messages() {
 
     const handleApproveWork = async (contractId) => {
         try {
-            const { error } = await supabase
-                .from('gig_contracts')
-                .update({ status: 'approved', approved_at: new Date().toISOString() })
-                .eq('id', contractId);
+            // approve_work is a SECURITY DEFINER RPC — buyer-only, only permitted
+            // while status='submitted', writes status/approved_at server-side.
+            // Same lockdown reasoning as deliver_work above.
+            const { error } = await supabase.rpc('approve_work', { p_contract_id: contractId });
             if (error) throw error;
 
             showToast('Work approved! 🎉', 'success');
@@ -688,7 +767,83 @@ export default function Messages() {
             // Cashfree account, so there is nothing to release early anymore.
         } catch (err) {
             console.error('Error approving work:', err);
-            showToast('Action failed', 'error');
+            showToast(err.message || 'Action failed', 'error');
+        }
+    };
+
+    // request_revision is a SECURITY DEFINER RPC — buyer-only, enforces the
+    // revisions cap server-side against gig_offers.revisions, reverts
+    // status to 'in_progress', writes revision_notes, and notifies the
+    // seller itself. The client-side cap check on the button (below) is a
+    // UX nicety only — this RPC call is the real enforcement, and its
+    // exception text (e.g. "No revisions remaining on this offer") is what
+    // actually gets shown on failure, not a generic message.
+    const handleRequestRevision = async (e) => {
+        e.preventDefault();
+        if (!revisionModal || !user) return;
+        const trimmed = revisionNotes.trim();
+        if (!trimmed) return;
+
+        setSubmittingRevision(true);
+        try {
+            const { data, error } = await supabase.rpc('request_revision', {
+                p_contract_id: revisionModal.contractId,
+                p_notes: trimmed,
+            });
+            if (error) throw error;
+
+            const row = Array.isArray(data) ? data[0] : data;
+            const remaining = row?.revisions_remaining;
+            showToast(
+                remaining != null ? `Revision requested — ${remaining} remaining` : 'Revision requested',
+                'success'
+            );
+            setRevisionModal(null);
+            setRevisionNotes('');
+            loadGigContext();
+        } catch (err) {
+            console.error('Error requesting revision:', err);
+            // Surface the RPC's own exception text as-is — it's already specific
+            // (e.g. "No revisions remaining on this offer") — no generic wrapper.
+            showToast(err.message || 'Failed to request revision', 'error');
+        } finally {
+            setSubmittingRevision(false);
+        }
+    };
+
+    // raise_dispute is a SECURITY DEFINER RPC — buyer-only, enforces paid-only
+    // and at-most-one-open-dispute-per-contract server-side. The isPaid/
+    // hasOpenDispute checks on the button (above) are UX niceties only — this
+    // RPC call is the real enforcement, and its exception text (e.g. "A dispute
+    // is already open on this contract") is what actually gets shown on failure.
+    const handleRaiseDispute = async (e) => {
+        e.preventDefault();
+        if (!disputeModal || !user) return;
+        const trimmedDesc = disputeDescription.trim();
+        if (!disputeCategory || !trimmedDesc) return;
+
+        setSubmittingDispute(true);
+        try {
+            const { error } = await supabase.rpc('raise_dispute', {
+                p_contract_id: disputeModal.contractId,
+                p_category: disputeCategory,
+                p_description: trimmedDesc,
+            });
+            if (error) throw error;
+
+            showToast('Dispute raised — an admin will review it.', 'success');
+            setDisputeModal(null);
+            setDisputeCategory('');
+            setDisputeDescription('');
+            loadGigContext();
+        } catch (err) {
+            console.error('Error raising dispute:', err);
+            // Surface the RPC's own exception text as-is (e.g. "A dispute is
+            // already open on this contract", "Not authorized", "Disputes can
+            // only be raised on paid contracts") — no generic wrapper.
+            showToast(err.message || 'Failed to raise dispute', 'error');
+        } finally {
+            setSubmittingDispute(false);
         }
     };
 
@@ -858,15 +1013,34 @@ export default function Messages() {
     const handleSend = async (text, attachment) => {
         if (!activeId || !user) return;
         try {
-            const { data, error } = await supabase.from('messages')
-                .insert({ 
-                    conversation_id: activeId, 
-                    sender_id: user.id, 
-                    content: text.trim() || (attachment?.name || ''), 
-                    file_url: attachment?.url || null 
-                })
-                .select('*').single();
+            // Real server-side enforcement — send_message raises (gig exemption,
+            // connection gate, first-message allowance, group/channel conversations
+            // skip gating entirely). Replaces the raw insert, which had no gating at
+            // all beyond RLS-participant checks; the old client-side isLockedForReply
+            // check was cosmetic only. RPC returns just the new row's id (not the
+            // full row like the old .select('*').single() did), so the rest of the
+            // message object is built locally from known values — same fields the
+            // raw insert used to get back, and Realtime is still the primary sync
+            // path per the existing comment below.
+            const content = text.trim() || (attachment?.name || '');
+            const fileUrl = attachment?.url || null;
+            const { data: newId, error } = await supabase.rpc('send_message', {
+                p_conversation_id: activeId,
+                p_content: content,
+                p_file_url: fileUrl,
+            });
             if (error) throw error;
+            const data = {
+                id: newId,
+                conversation_id: activeId,
+                sender_id: user.id,
+                content,
+                file_url: fileUrl,
+                file_type: null,
+                created_at: new Date().toISOString(),
+                read_at: null,
+                is_read: false,
+            };
 
             // Optimistic update done via Realtime broadcast primarily, but we can do it here for speed
             setMessagesCache(prev => {
@@ -898,6 +1072,14 @@ export default function Messages() {
                 }).then(()=>{});
             }
         } catch (err) {
+            console.error('handleSend error:', err);
+            // send_message raises real exceptions for the gate it enforces (locked
+            // recipient, etc.) — surface that text as-is, same exact-error-surfacing
+            // pattern as the withdrawal queue's Mark Paid handler, rather than a
+            // generic "failed to send" that would bury the real reason. Still
+            // re-throwing so ChatWindow's handleSend doesn't clear the typed text
+            // on a failed send (its finally still runs setSending(false)).
+            showToast(err.message || 'Failed to send message.', 'error');
             throw err;
         }
     };
@@ -951,6 +1133,33 @@ export default function Messages() {
         setSearchParams({});
     };
 
+    // Per-user soft-hide, not a real deletion — messages, the other participant's
+    // view, and all gig/connection state are completely untouched. Server-side
+    // enforcement lives in hide_conversation (SECURITY DEFINER, scoped to
+    // auth.uid()) — it can only touch the caller's own conversation_participants
+    // row, same as send_message's scoping. Reappears automatically once the
+    // other person sends a new message after the hide (see the filter in
+    // fetchConversations above).
+    //
+    // No window.confirm() gate here — the confirm step is rendered in-app by
+    // ConversationList.jsx before this even gets called. Confirmed live that
+    // native confirm() is silently suppressed in this PWA's real contexts
+    // (installed PWAs on iOS/Android routinely no-op alert/confirm/prompt
+    // with zero visual feedback) — that was the actual cause of a real
+    // reported bug where clicking Delete appeared to do nothing.
+    const handleDeleteConversation = async (conversationId) => {
+        try {
+            const { error } = await supabase.rpc('hide_conversation', { p_conversation_id: conversationId });
+            if (error) throw error;
+            setConversations(prev => prev.filter(c => c.id !== conversationId));
+            if (activeId === conversationId) setSearchParams({});
+            showToast('Conversation deleted.', 'success');
+        } catch (err) {
+            console.error('handleDeleteConversation error:', err);
+            showToast(err.message || 'Failed to delete conversation.', 'error');
+        }
+    };
+
     const handleClearChat = async () => {
         if (!activeId) return;
         if (window.confirm('Are you sure you want to clear this chat? This will permanently delete all messages for both of you.')) {
@@ -998,12 +1207,14 @@ export default function Messages() {
                     loading={loadingConvs}
                     activeId={activeId}
                     onSelect={(c) => setSearchParams({ id: c.id })}
+                    onDeleteConversation={handleDeleteConversation}
                     searchQuery={searchQuery}
                     onSearchChange={setSearchQuery}
                     activeTab={activeTab}
                     onTabChange={setActiveTab}
                     roomTab={roomTab}
                     onRoomTabChange={setRoomTab}
+                    gigConversationIds={gigConversationIds}
                     onlineUsers={onlineUsers}
                 />
             </div>
@@ -1120,6 +1331,11 @@ export default function Messages() {
 
                                 const isPaid = gigContext.contractPaymentStatus === 'paid';
 
+                                // disputes.status='open' is the sole signal — gig_contracts.status is
+                                // never touched by the dispute feature, so this is a separate freeze
+                                // layer on top of whatever the contract's own status implies.
+                                const hasOpenDispute = !!gigContext.openDispute;
+
                                 // Line items: real gig_offer_items rows if present, otherwise a
                                 // single synthetic "Service" row for legacy pre-line-item offers.
                                 const rawItems = gigContext.activeOfferItems || [];
@@ -1185,6 +1401,13 @@ export default function Messages() {
                                                 </div>
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                                                     {offer.delivery_days} Days • {offer.revisions} Revisions
+                                                    {/* Only meaningful once a contract exists — revisions_used only
+                                                        starts being tracked once the offer is paid for. */}
+                                                    {gigContext.contract && (
+                                                        <span style={{ color: 'var(--text-muted)' }}>
+                                                            {' '}({Math.max(0, (offer.revisions ?? 0) - (gigContext.contract.revisions_used ?? 0))} remaining)
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 {offer.terms && (
                                                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
@@ -1263,6 +1486,19 @@ export default function Messages() {
                                                 </div>
                                             )}
 
+                                            {/* Dispute banner — both parties, for the duration the dispute is open.
+                                                gig_contracts.status is untouched by this feature, so Submit Work /
+                                                Approve / Request Revision are separately gated on !hasOpenDispute
+                                                below rather than this freezing the contract's own status. */}
+                                            {gigContext.contract && hasOpenDispute && (
+                                                <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '0.7rem 0.85rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                                                    <div style={{ fontSize: '0.8rem', fontWeight: 800, color: '#EF4444' }}>⚠️ Dispute Open — pending admin review</div>
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                                        Approve, Request Revision, and Submit Work are paused until this is resolved.
+                                                    </div>
+                                                </div>
+                                            )}
+
                                             {/* Delivery deadline — visible to both parties while work is in progress */}
                                             {gigContext.contract?.status === 'in_progress' && gigContext.contract?.buyer_response_deadline && (() => {
                                                 const deadline = new Date(gigContext.contract.buyer_response_deadline);
@@ -1275,8 +1511,21 @@ export default function Messages() {
                                                 );
                                             })()}
 
+                                            {/* Revision requested — seller's view. Distinguishes "buyer asked for
+                                                a revision" from "never delivered yet" by requiring revision_notes
+                                                to be non-null (both states share status='in_progress'). Shown
+                                                before Submit Work so the seller sees what to fix before redelivering. */}
+                                            {gigContext.contract?.status === 'in_progress' && gigContext.isSeller && gigContext.contract?.revision_notes && (
+                                                <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 8, padding: '0.7rem 0.85rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                                                    <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#B45309', textTransform: 'uppercase' }}>🔁 Revision Requested</div>
+                                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>
+                                                        {gigContext.contract.revision_notes}
+                                                    </div>
+                                                </div>
+                                            )}
+
                                             {/* Submit Work — seller, once work is in progress */}
-                                            {gigContext.contract?.status === 'in_progress' && gigContext.isSeller && (
+                                            {gigContext.contract?.status === 'in_progress' && gigContext.isSeller && !hasOpenDispute && (
                                                 <button
                                                     onClick={() => setDeliveryModal({ contractId: gigContext.contract.id })}
                                                     className="btn-primary"
@@ -1306,15 +1555,28 @@ export default function Messages() {
                                                 </div>
                                             )}
 
-                                            {/* Approve — buyer, once work has been submitted */}
-                                            {gigContext.contract?.status === 'submitted' && gigContext.isBuyer && (
-                                                <button
-                                                    onClick={() => handleApproveWork(gigContext.contract.id)}
-                                                    className="btn-primary"
-                                                    style={{ padding: '0.4rem 0.8rem', borderRadius: 6, fontSize: '0.75rem', alignSelf: 'flex-start' }}
-                                                >
-                                                    Approve
-                                                </button>
+                                            {/* Approve / Request Revision — buyer, once work has been submitted.
+                                                Request Revision only shown while under the cap — this is a UX
+                                                nicety only, request_revision itself is the real enforcement
+                                                (its exception is what actually blocks an over-cap request). */}
+                                            {gigContext.contract?.status === 'submitted' && gigContext.isBuyer && !hasOpenDispute && (
+                                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                    <button
+                                                        onClick={() => handleApproveWork(gigContext.contract.id)}
+                                                        className="btn-primary"
+                                                        style={{ padding: '0.4rem 0.8rem', borderRadius: 6, fontSize: '0.75rem', alignSelf: 'flex-start' }}
+                                                    >
+                                                        Approve
+                                                    </button>
+                                                    {(gigContext.contract.revisions_used ?? 0) < (offer.revisions ?? 0) && (
+                                                        <button
+                                                            onClick={() => setRevisionModal({ contractId: gigContext.contract.id })}
+                                                            style={{ padding: '0.4rem 0.8rem', borderRadius: 6, fontSize: '0.75rem', background: 'transparent', border: '1px solid var(--peacock-green)', color: 'var(--peacock-green)', fontWeight: 600, cursor: 'pointer', alignSelf: 'flex-start' }}
+                                                        >
+                                                            Request Revision
+                                                        </button>
+                                                    )}
+                                                </div>
                                             )}
 
                                             {/* Approved confirmation — both parties */}
@@ -1322,6 +1584,21 @@ export default function Messages() {
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--peacock-green)', fontWeight: 700 }}>
                                                     ✅ Work approved — gig complete
                                                 </div>
+                                            )}
+
+                                            {/* Raise Dispute — buyer, once paid, regardless of contract status
+                                                (in_progress/submitted/approved) — covers non-delivery,
+                                                exhausted-revisions, and post-approval scenarios uniformly.
+                                                raise_dispute itself is the real enforcement (paid-only, one
+                                                open dispute at a time, buyer-only) — isPaid/hasOpenDispute here
+                                                are the same UX-nicety pattern as Request Revision's cap check. */}
+                                            {isPaid && gigContext.isBuyer && !hasOpenDispute && (
+                                                <button
+                                                    onClick={() => setDisputeModal({ contractId: gigContext.contract.id })}
+                                                    style={{ padding: '0.35rem 0.7rem', borderRadius: 6, fontSize: '0.72rem', background: 'transparent', border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444', fontWeight: 600, cursor: 'pointer', alignSelf: 'flex-start' }}
+                                                >
+                                                    ⚠️ Raise Dispute
+                                                </button>
                                             )}
                                         </div>
 
@@ -1639,9 +1916,153 @@ export default function Messages() {
                                     </div>
                                 </div>
                             )}
+
+                            {/* Request Revision Modal — same chrome as Deliver Work Modal above */}
+                            {revisionModal && (
+                                <div style={{
+                                    position: 'fixed', inset: 0, zIndex: 9999,
+                                    background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    padding: '1rem'
+                                }}>
+                                    <div style={{
+                                        background: 'var(--bg-surface)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: 16,
+                                        padding: '2rem',
+                                        width: '100%',
+                                        maxWidth: 480,
+                                        boxShadow: 'var(--shadow-lg)',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '1.25rem'
+                                    }}>
+                                        <div>
+                                            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>🔁 Request Revision</h3>
+                                            <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                                Tell the seller what needs to change. This sends the work back to in-progress.
+                                            </p>
+                                        </div>
+
+                                        <form onSubmit={handleRequestRevision} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>What needs to change? *</label>
+                                                <textarea
+                                                    rows={4}
+                                                    required
+                                                    value={revisionNotes}
+                                                    onChange={e => setRevisionNotes(e.target.value)}
+                                                    placeholder="Be specific — this is what the seller will see before redelivering..."
+                                                    disabled={submittingRevision}
+                                                    style={{ width: '100%', padding: '0.6rem 0.8rem', borderRadius: 8, border: '1px solid var(--border-color)', fontSize: '0.85rem', background: 'var(--bg-base)', color: 'var(--text-primary)', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                                                />
+                                            </div>
+
+                                            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.1rem' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setRevisionModal(null); setRevisionNotes(''); }}
+                                                    disabled={submittingRevision}
+                                                    style={{ flex: 1, padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.85rem', cursor: submittingRevision ? 'not-allowed' : 'pointer' }}
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    type="submit"
+                                                    disabled={submittingRevision || !revisionNotes.trim()}
+                                                    className="btn-primary"
+                                                    style={{ flex: 2, padding: '0.6rem', borderRadius: 8, fontSize: '0.85rem', fontWeight: 700, opacity: (submittingRevision || !revisionNotes.trim()) ? 0.7 : 1, cursor: (submittingRevision || !revisionNotes.trim()) ? 'not-allowed' : 'pointer' }}
+                                                >
+                                                    {submittingRevision ? 'Requesting...' : 'Request Revision'}
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Raise Dispute Modal — same chrome as Deliver Work / Request Revision modals */}
+                            {disputeModal && (
+                                <div style={{
+                                    position: 'fixed', inset: 0, zIndex: 9999,
+                                    background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    padding: '1rem'
+                                }}>
+                                    <div style={{
+                                        background: 'var(--bg-surface)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: 16,
+                                        padding: '2rem',
+                                        width: '100%',
+                                        maxWidth: 480,
+                                        boxShadow: 'var(--shadow-lg)',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '1.25rem'
+                                    }}>
+                                        <div>
+                                            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>⚠️ Raise Dispute</h3>
+                                            <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                                An admin will review this. Approve, Request Revision, and Submit Work pause for both of you until it's resolved.
+                                            </p>
+                                        </div>
+
+                                        <form onSubmit={handleRaiseDispute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Category *</label>
+                                                <select
+                                                    required
+                                                    value={disputeCategory}
+                                                    onChange={e => setDisputeCategory(e.target.value)}
+                                                    disabled={submittingDispute}
+                                                    style={{ width: '100%', padding: '0.6rem 0.8rem', borderRadius: 8, border: '1px solid var(--border-color)', fontSize: '0.85rem', background: 'var(--bg-base)', color: 'var(--text-primary)', boxSizing: 'border-box', fontFamily: 'inherit', cursor: 'pointer' }}
+                                                >
+                                                    <option value="" disabled>Select a category</option>
+                                                    <option value="non_delivery">Non-delivery</option>
+                                                    <option value="quality_issue">Quality issue</option>
+                                                    <option value="post_approval_issue">Post-approval issue</option>
+                                                    <option value="other">Other</option>
+                                                </select>
+                                            </div>
+
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>What happened? *</label>
+                                                <textarea
+                                                    rows={4}
+                                                    required
+                                                    value={disputeDescription}
+                                                    onChange={e => setDisputeDescription(e.target.value)}
+                                                    placeholder="Describe the issue — this is what the admin will review..."
+                                                    disabled={submittingDispute}
+                                                    style={{ width: '100%', padding: '0.6rem 0.8rem', borderRadius: 8, border: '1px solid var(--border-color)', fontSize: '0.85rem', background: 'var(--bg-base)', color: 'var(--text-primary)', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                                                />
+                                            </div>
+
+                                            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.1rem' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setDisputeModal(null); setDisputeCategory(''); setDisputeDescription(''); }}
+                                                    disabled={submittingDispute}
+                                                    style={{ flex: 1, padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.85rem', cursor: submittingDispute ? 'not-allowed' : 'pointer' }}
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    type="submit"
+                                                    disabled={submittingDispute || !disputeCategory || !disputeDescription.trim()}
+                                                    style={{ flex: 2, padding: '0.6rem', borderRadius: 8, fontSize: '0.85rem', fontWeight: 700, background: '#EF4444', color: '#fff', border: 'none', opacity: (submittingDispute || !disputeCategory || !disputeDescription.trim()) ? 0.7 : 1, cursor: (submittingDispute || !disputeCategory || !disputeDescription.trim()) ? 'not-allowed' : 'pointer' }}
+                                                >
+                                                    {submittingDispute ? 'Submitting...' : 'Raise Dispute'}
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
-                    <ChatWindow 
+                    <ChatWindow
                         conversation={activeConversation}
                         messages={activeMessages}
                         loadingMsgs={loadingMsgs}

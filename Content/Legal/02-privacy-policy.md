@@ -12,7 +12,7 @@
 
 ## 1. Introduction
 
-Chavee ("we," "us," "our," or "the Platform") is operated by Chavee, based at Adimaparambil House, Ponmundam PO, Ponmundam, Tirur, Kerala 676106, India. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit or use chavee.in and any associated mobile applications (collectively, the "Services").
+Chavee ("we," "us," "our," or "the Platform") is operated by Chavee, based at 2nd Floor, West End Tower, T. P. Road, Calicut, Kerala - 673004, India. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit or use chavee.in and any associated mobile applications (collectively, the "Services").
 
 By creating an account or otherwise using Chavee, you agree to the terms of this Privacy Policy. If you do not agree with any part of this policy, please do not use our Services.
 
@@ -110,8 +110,8 @@ Our infrastructure providers may process and store data in locations outside Ind
 If you have questions, concerns, or requests regarding this Privacy Policy or your personal data, please contact us at:
 
 **Chavee**
-Adimaparambil House, Ponmundam PO, Ponmundam
-Tirur, Kerala 676106, India
+2nd Floor, West End Tower, T. P. Road, Calicut
+Kerala - 673004, India
 Email: info@chavee.in
 
 ## 13. Changes to This Policy

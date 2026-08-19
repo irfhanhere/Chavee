@@ -3,10 +3,33 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import Navbar from '../components/Navbar.jsx';
 import Footer from '../components/Footer.jsx';
+import SEO from '../components/SEO.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import { useLandingStats } from '../hooks/useLandingStats.js';
+import { useTestimonials } from '../hooks/useTestimonials.js';
 import { useIsMobile } from '../hooks/useIsMobile.js';
 import MobileLanding from './MobileLanding.jsx';
+
+// Real platform-preview screenshots for the "Beautifully Designed" marquee.
+// Files sourced from design-references/Images/, resized/compressed into
+// public/assets/platform-preview/ (see PR notes — originals ranged 200-340KB
+// at up to 1536px wide; these are re-encoded to fit their actual ~600x400
+// display size at retina density).
+const PLATFORM_PREVIEW_SHOTS = [
+    { name: 'Dashboard', desc: 'Your personalized hub.', img: '/assets/platform-preview/dashboard.jpg', fallbackIcon: '📊' },
+    { name: 'Communities', desc: 'Vibrant student groups.', img: '/assets/platform-preview/communities.webp', fallbackIcon: '👥' },
+    { name: 'Opportunities', desc: 'Gigs and internships.', img: '/assets/platform-preview/opportunities.jpg', fallbackIcon: '💼' },
+    { name: 'Events', desc: 'Campus happenings.', img: '/assets/platform-preview/events.jpg', fallbackIcon: '🎪' },
+    { name: 'Networking', desc: 'Find mentors and peers.', img: '/assets/platform-preview/networking.jpg', fallbackIcon: '🤝' },
+];
+
+// Real featured-section photos for Communities / Premium Events / Student
+// Marketplace, replacing the sparkle-emoji placeholders.
+const FEATURED_IMAGES = {
+    Communities: '/assets/featured/communities.jpg',
+    'Premium Events': '/assets/featured/premium-events.jpg',
+    'Student Marketplace': '/assets/featured/student-marketplace.jpg',
+};
 
 /* ── Floating Notification Card Component ── */
 const FloatingCard = ({ delay, top, right, icon, title, subtitle }) => (
@@ -53,6 +76,7 @@ export default function Landing() {
     const { user } = useAuth();
     const { scrollYProgress } = useScroll();
     const stats = useLandingStats();
+    const { testimonials } = useTestimonials();
     const isMobile = useIsMobile();
 
     const handleExplore = () => {
@@ -75,11 +99,24 @@ export default function Landing() {
     // every hook above has already been called, same pattern AppOpening.jsx
     // uses for its own post-hooks early return. Nothing below this point
     // (the desktop JSX) is reachable or altered when this branch is taken.
+    // Same real title/description already baked into index.html's static
+    // <head> — made explicit here via Helmet so the homepage is controlled
+    // the same consistent way as every other public page (and so its
+    // canonical is emitted from the same single source of truth).
+    const homeSEO = (
+        <SEO
+            title="Chavee — India's First Student Social Platform | Learn Earn Network Belong"
+            description="Chavee is India's first student social networking platform. Learn languages, earn through gigs, find mentors, join communities and attend events. Free for all college students. Based in Kerala, growing across India."
+            path="/"
+        />
+    );
+
     if (isMobile) {
         return (
             <div style={{ overflowX: 'hidden' }}>
+                {homeSEO}
                 <Navbar />
-                <MobileLanding stats={stats} handleExplore={handleExplore} />
+                <MobileLanding stats={stats} handleExplore={handleExplore} testimonials={testimonials} />
                 <Footer />
             </div>
         );
@@ -87,6 +124,7 @@ export default function Landing() {
 
     return (
         <div style={{ background: '#F8FAFC', minHeight: '100vh', fontFamily: "'Inter', sans-serif", overflowX: 'hidden' }}>
+            {homeSEO}
             <Navbar />
 
             {/* SECTION 1: HERO */}
@@ -346,17 +384,7 @@ export default function Landing() {
                         }}
                         style={{ display: 'flex', gap: '2rem', width: 'max-content', padding: '0 2rem' }}
                     >
-                        {[
-                            { name: 'Dashboard', desc: 'Your personalized hub.', img: '/assets/platform-preview/dashboard.jpg', fallbackIcon: '📊' },
-                            { name: 'Communities', desc: 'Vibrant student groups.', img: '/assets/platform-preview/communities.jpg', fallbackIcon: '👥' },
-                            { name: 'Opportunities', desc: 'Gigs and internships.', img: '/assets/platform-preview/opportunities.jpg', fallbackIcon: '💼' },
-                            { name: 'Events', desc: 'Campus happenings.', img: '/assets/platform-preview/events.jpg', fallbackIcon: '🎪' },
-                            // Duplicate set for seamless infinite scrolling
-                            { name: 'Dashboard', desc: 'Your personalized hub.', img: '/assets/platform-preview/dashboard.jpg', fallbackIcon: '📊' },
-                            { name: 'Communities', desc: 'Vibrant student groups.', img: '/assets/platform-preview/communities.jpg', fallbackIcon: '👥' },
-                            { name: 'Opportunities', desc: 'Gigs and internships.', img: '/assets/platform-preview/opportunities.jpg', fallbackIcon: '💼' },
-                            { name: 'Events', desc: 'Campus happenings.', img: '/assets/platform-preview/events.jpg', fallbackIcon: '🎪' }
-                        ].map((shot, i) => (
+                        {[...PLATFORM_PREVIEW_SHOTS, ...PLATFORM_PREVIEW_SHOTS].map((shot, i) => (
                             <div
                                 key={i}
                                 style={{
@@ -371,9 +399,10 @@ export default function Landing() {
                                     boxShadow: '0 20px 40px rgba(0,0,0,0.05)'
                                 }}
                             >
-                                <img 
-                                    src={shot.img} 
-                                    alt={shot.name} 
+                                <img
+                                    src={shot.img}
+                                    alt={shot.name}
+                                    loading="lazy"
                                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                     onError={(e) => {
                                         e.target.style.display = 'none';
@@ -469,8 +498,18 @@ export default function Landing() {
                                     {feat.btn}
                                 </button>
                             </div>
-                            <div style={{ flex: 1, height: '300px', background: '#FFFFFF', borderRadius: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.05)', border: '1px solid #E5E7EB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <span style={{ fontSize: '4rem', opacity: 0.5 }}>✨</span>
+                            <div style={{ flex: 1, height: '300px', background: '#FFFFFF', borderRadius: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.05)', border: '1px solid #E5E7EB', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
+                                <img
+                                    src={FEATURED_IMAGES[feat.title]}
+                                    alt={feat.title}
+                                    loading="lazy"
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                    onError={(e) => {
+                                        e.target.style.display = 'none';
+                                        e.target.nextSibling.style.display = 'flex';
+                                    }}
+                                />
+                                <span style={{ display: 'none', fontSize: '4rem', opacity: 0.5, position: 'absolute' }}>✨</span>
                             </div>
                         </motion.div>
                     ))}
@@ -478,48 +517,50 @@ export default function Landing() {
                 </div>
             </section>
 
-            {/* SECTION 8: STUDENT STORIES (EARLY COMMUNITY) */}
-            <section style={{ padding: '8rem 1.5rem', background: '#F8FAFC' }}>
-                <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-                    <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
+            {/* SECTION 8: STUDENT STORIES — real approved+featured testimonials only.
+                Omitted entirely (no empty-state) when there are zero matching rows. */}
+            {testimonials.length > 0 && (
+                <section style={{ padding: '8rem 0', background: '#F8FAFC', overflow: 'hidden' }}>
+                    <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 1.5rem', textAlign: 'center', marginBottom: '4rem' }}>
                         <h2 style={{ fontSize: '2.5rem', fontWeight: 900, color: '#111827', marginBottom: '1rem' }}>Building Chavee Together</h2>
                         <p style={{ fontSize: '1.15rem', color: '#6B7280', maxWidth: '600px', margin: '0 auto' }}>
-                            Our first members and testers are helping shape the future of Chavee. Student stories and success stories will appear here as our community grows.
+                            Real stories from the students helping shape Chavee.
                         </p>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem' }}>
-                        {[
-                            { badge: '🚀 Early Tester', desc: 'Currently exploring communities and platform features.' },
-                            { badge: '🎓 Founding Student', desc: 'Helping us improve the learning experience.' },
-                            { badge: '💚 Community Builder', desc: 'Providing feedback to make Chavee better for every student.' }
-                        ].map((card, i) => (
-                            <motion.div 
-                                key={i}
-                                initial={{ opacity: 0, scale: 0.95 }}
-                                whileInView={{ opacity: 1, scale: 1 }}
-                                viewport={{ once: true }}
-                                transition={{ delay: i * 0.1 }}
-                                style={{ background: '#FFFFFF', padding: '2.5rem', borderRadius: '24px', border: '1px solid #E5E7EB', display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', textAlign: 'center' }}
-                            >
-                                <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: '#EAFBF3', border: '2px dashed #0B8F5A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem' }}>
-                                    👤
-                                </div>
-                                <div>
-                                    <div style={{ display: 'inline-block', padding: '0.25rem 0.75rem', background: '#111827', color: '#FFFFFF', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 700, marginBottom: '1rem' }}>
-                                        {card.badge}
+                    <div style={{ position: 'relative', width: '100%', overflow: 'hidden', paddingBottom: '1rem' }}>
+                        <motion.div
+                            animate={{ x: ['0%', '-50%'] }}
+                            transition={{ ease: 'linear', duration: 25, repeat: Infinity }}
+                            style={{ display: 'flex', gap: '2rem', width: 'max-content', padding: '0 2rem' }}
+                        >
+                            {[...testimonials, ...testimonials].map((t, i) => (
+                                <div
+                                    key={`${t.id}-${i}`}
+                                    style={{ width: '380px', flexShrink: 0, background: '#FFFFFF', padding: '2.5rem', borderRadius: '24px', border: '1px solid #E5E7EB', display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', textAlign: 'center' }}
+                                >
+                                    <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: '#EAFBF3', border: '2px solid #0B8F5A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem', overflow: 'hidden' }}>
+                                        {t.photo ? <img src={t.photo} alt={t.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '👤'}
                                     </div>
-                                    <p style={{ color: '#6B7280', fontStyle: 'italic', lineHeight: 1.6 }}>"{card.desc}"</p>
+                                    <div>
+                                        <div style={{ display: 'inline-block', padding: '0.25rem 0.75rem', background: '#111827', color: '#FFFFFF', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 700, marginBottom: '1rem' }}>
+                                            {t.name}{t.role ? ` · ${t.role}` : ''}
+                                        </div>
+                                        {t.rating && (
+                                            <div style={{ color: '#F59E0B', marginBottom: '0.5rem' }}>{'★'.repeat(t.rating)}{'☆'.repeat(5 - t.rating)}</div>
+                                        )}
+                                        <p style={{ color: '#6B7280', fontStyle: 'italic', lineHeight: 1.6 }}>"{t.feedback}"</p>
+                                    </div>
                                 </div>
-                            </motion.div>
-                        ))}
+                            ))}
+                        </motion.div>
                     </div>
 
                     <div style={{ textAlign: 'center', marginTop: '3rem' }}>
                         <p style={{ fontWeight: 600, color: '#0B8F5A' }}>Join today and become one of our founding members.</p>
                     </div>
-                </div>
-            </section>
+                </section>
+            )}
 
             {/* SECTION 9: FINAL CTA */}
             <section style={{ padding: '8rem 1.5rem', background: '#0B8F5A', color: '#FFFFFF', textAlign: 'center' }}>

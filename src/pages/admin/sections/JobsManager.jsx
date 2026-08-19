@@ -21,6 +21,14 @@ function Toast({ msg, type }) {
     );
 }
 
+// Simple, real slugify — matches the seeded categories' slug shape
+// (lowercase, hyphen-separated, no punctuation).
+function slugify(name) {
+    return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+const OTHER_CATEGORY_VALUE = '__other__';
+
 function StatCard({ title, count, color, icon, loading }) {
     return (
         <div style={{
@@ -45,9 +53,16 @@ export default function JobsManager() {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(true);
     const [categories, setCategories] = useState([]);
-    
+    const [companies, setCompanies] = useState([]);
+    const [companyFilter, setCompanyFilter] = useState('All Companies');
+
     // Stats
-    const [stats, setStats] = useState({ total: 0, live: 0, featured: 0, reported: 0 });
+    const [stats, setStats] = useState({ total: 0, live: 0, pendingReview: 0, featured: 0, reported: 0 });
+
+    // Inline "+ Add New Company" quick-create, opened from inside the job form
+    const [quickCompanyOpen, setQuickCompanyOpen] = useState(false);
+    const [quickCompanyName, setQuickCompanyName] = useState('');
+    const [savingQuickCompany, setSavingQuickCompany] = useState(false);
 
     const [toast, setToast] = useState(null);
     const toastTimer = useRef(null);
@@ -69,13 +84,21 @@ export default function JobsManager() {
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            // Fetch Jobs
-            const { data: jobsData, error: jobsErr } = await supabase.from('jobs').select('*').order('created_at', { ascending: false });
+            // Fetch Jobs — real company relation embedded, so logo/name come
+            // from the companies table now instead of the per-job emoji field.
+            const { data: jobsData, error: jobsErr } = await supabase
+                .from('jobs')
+                .select('*, companies(id, name, logo_url, is_official)')
+                .order('created_at', { ascending: false });
             if (jobsErr) throw jobsErr;
 
             // Fetch Categories
             const { data: catsData } = await supabase.from('job_categories').select('*');
             setCategories(catsData || []);
+
+            // Fetch real Companies list — used for the picker + filter dropdown
+            const { data: companiesData } = await supabase.from('companies').select('*').order('name');
+            setCompanies(companiesData || []);
 
             // Fetch Proposals Count
             let appsCountMap = {};
@@ -95,12 +118,13 @@ export default function JobsManager() {
                 applicant_count: appsCountMap[j.id] || 0,
                 is_reported: reportedSet.has(j.id)
             }));
-            
+
             setRows(enriched);
-            
+
             setStats({
                 total: enriched.length,
                 live: enriched.filter(j => j.status === 'live' && !j.admin_hidden).length,
+                pendingReview: enriched.filter(j => j.status === 'pending_review').length,
                 featured: enriched.filter(j => j.featured).length,
                 reported: reportedSet.size
             });
@@ -133,22 +157,59 @@ export default function JobsManager() {
         setSaving(true);
         try {
             const isInternal = !!values.application_type;
+
+            // Real company relationship — write both company_id (FK) and the
+            // matching company text (resolved from the selected company's
+            // real name), so every existing text-column read site (Careers,
+            // Earn.jsx, this manager's own list/apps view) keeps working
+            // unmodified while the new relational column is also correct.
+            const selectedCompany = companies.find(c => c.id === values.company_id);
+
+            // "Other" category: case-insensitive lookup against real
+            // job_categories first (so "Design" and "design" never create
+            // two rows), only creating a new row when no match exists.
+            let categoryId = values.category_id || null;
+            if (categoryId === OTHER_CATEGORY_VALUE) {
+                const newCatName = values.category_other_name?.trim();
+                if (!newCatName) throw new Error('Enter a name for the new category.');
+
+                const { data: existingCat, error: lookupErr } = await supabase
+                    .from('job_categories')
+                    .select('id, name')
+                    .ilike('name', newCatName)
+                    .maybeSingle();
+                if (lookupErr) throw lookupErr;
+
+                if (existingCat) {
+                    categoryId = existingCat.id;
+                } else {
+                    const { data: createdCat, error: createErr } = await supabase
+                        .from('job_categories')
+                        .insert({ name: newCatName, slug: slugify(newCatName) })
+                        .select('id, name')
+                        .single();
+                    if (createErr) throw createErr;
+                    categoryId = createdCat.id;
+                    setCategories(prev => [...prev, createdCat]);
+                }
+            }
+
             const payload = {
                 title: values.title?.trim(),
-                company: values.company?.trim(),
+                company_id: values.company_id || null,
+                company: selectedCompany?.name || values.company?.trim() || '',
                 job_type: values.job_type,
                 description: values.description?.trim() || null,
                 apply_url: isInternal ? null : (values.apply_url?.trim() || null),
                 application_type: isInternal ? 'internal' : 'portal',
-                status: values.status ? 'live' : 'closed',
+                status: values.status || 'pending_review',
                 location: values.location?.trim() || 'Remote',
                 compensation: values.compensation?.trim() || 'Negotiable',
                 salary_min: values.salary_min || null,
                 salary_max: values.salary_max || null,
                 duration: values.duration?.trim() || 'Flexible',
                 skills: values.skills?.trim() || 'General',
-                logo: values.logo?.trim() || '🏢',
-                category_id: values.category_id || null,
+                category_id: categoryId,
                 deadline: values.deadline || null
             };
 
@@ -231,14 +292,50 @@ export default function JobsManager() {
 
     const formatCurrency = (amount) => amount ? `₹${Number(amount).toLocaleString('en-IN')}` : '';
 
+    // Inline "+ Add New Company" — a real, minimal insert (name only; full
+    // profile details can be filled in later from the Companies page).
+    // Refreshing `companies` alone (not the whole job list) lets the open
+    // job form's dropdown pick up the new option immediately.
+    const handleQuickAddCompany = async () => {
+        if (!quickCompanyName.trim()) return;
+        setSavingQuickCompany(true);
+        try {
+            const { data, error } = await supabase.from('companies').insert({ name: quickCompanyName.trim() }).select().single();
+            if (error) throw error;
+            setCompanies(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+            showToast(`"${data.name}" added — select it from the dropdown.`);
+            setQuickCompanyOpen(false);
+            setQuickCompanyName('');
+        } catch (err) {
+            showToast('Failed to add company: ' + err.message, 'error');
+        } finally {
+            setSavingQuickCompany(false);
+        }
+    };
+
+    // Real distinct companies represented in the currently loaded jobs list.
+    const companyFilterOptions = useMemo(() => {
+        const seen = new Map();
+        rows.forEach(r => { if (r.companies) seen.set(r.companies.id, r.companies.name); });
+        return ['All Companies', ...seen.values()];
+    }, [rows]);
+
+    const filteredRows = companyFilter === 'All Companies'
+        ? rows
+        : rows.filter(r => r.companies?.name === companyFilter);
+
     const columns = [
         {
             key: 'title', label: 'Job Title', sortable: true,
             render: (v, row) => (
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.9rem' }}>{v || '—'}</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
-                        {row.logo} {row.company}
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                        {row.companies?.logo_url ? (
+                            <img src={row.companies.logo_url} alt="" style={{ width: 16, height: 16, borderRadius: 4, objectFit: 'contain' }} />
+                        ) : (row.logo || '🏢')}
+                        {row.companies?.name || row.company}
+                        {row.companies?.is_official && <span style={{ fontSize: '0.63rem', fontWeight: 800, color: 'var(--peacock-green)', background: 'var(--bg-mint)', padding: '0.05rem 0.4rem', borderRadius: 20 }}>Official</span>}
                     </span>
                     <div style={{ marginTop: '0.2rem', display: 'flex', gap: '0.5rem' }}>
                         {row.is_reported && <span style={{ color: '#EF4444', fontWeight: 700, fontSize: '0.7rem' }}>🚩 Reported</span>}
@@ -259,15 +356,19 @@ export default function JobsManager() {
         },
         {
             key: 'status', label: 'Status', sortable: true,
-            render: (v) => (
-                <span style={{
-                    padding: '0.15rem 0.5rem', borderRadius: 20, fontSize: '0.72rem', fontWeight: 700,
-                    background: v === 'live' ? 'rgba(16,185,129,0.1)' : 'rgba(100,116,139,0.1)',
-                    color: v === 'live' ? '#10B981' : 'var(--text-muted)'
-                }}>
-                    {v === 'live' ? '● Live' : '○ ' + v}
-                </span>
-            )
+            render: (v) => {
+                const map = {
+                    live: { label: '● Live', bg: 'rgba(16,185,129,0.1)', color: '#10B981' },
+                    pending_review: { label: '● Pending Review', bg: 'rgba(245,158,11,0.1)', color: '#F59E0B' },
+                    closed: { label: '○ Closed', bg: 'rgba(100,116,139,0.1)', color: 'var(--text-muted)' },
+                };
+                const s = map[v] || { label: '○ ' + v, bg: 'rgba(100,116,139,0.1)', color: 'var(--text-muted)' };
+                return (
+                    <span style={{ padding: '0.15rem 0.5rem', borderRadius: 20, fontSize: '0.72rem', fontWeight: 700, background: s.bg, color: s.color }}>
+                        {s.label}
+                    </span>
+                );
+            }
         },
         {
             key: 'deadline', label: 'Deadline', sortable: true,
@@ -283,9 +384,22 @@ export default function JobsManager() {
 
     const fields = [
         { key: 'title', label: 'Job Title', type: 'text', required: true },
-        { key: 'company', label: 'Company', type: 'text', required: true },
-        { key: 'logo', label: 'Company Logo (Emoji)', type: 'text', placeholder: '🏢' },
-        { key: 'category_id', label: 'Category', type: 'select', options: categories.map(c => ({ value: c.id, label: c.name })) },
+        {
+            key: 'company_id', label: 'Company', type: 'select_with_action', required: true,
+            options: companies.map(c => ({ value: c.id, label: c.is_official ? `${c.name} (Official)` : c.name })),
+            onAction: () => setQuickCompanyOpen(true), actionLabel: '+ Add New Company',
+            hint: 'Jobs under the official Chavee company appear on the public Careers page.'
+        },
+        {
+            key: 'category_id', label: 'Category', type: 'select',
+            options: [...categories.map(c => ({ value: c.id, label: c.name })), { value: OTHER_CATEGORY_VALUE, label: 'Other (add new category)' }],
+        },
+        {
+            key: 'category_other_name', label: 'New Category Name', type: 'text', required: true,
+            condition: (vals) => vals.category_id === OTHER_CATEGORY_VALUE,
+            placeholder: 'e.g. Data Science',
+            hint: 'Reuses a matching existing category (case-insensitive) if one already exists, otherwise creates it.',
+        },
         { key: 'job_type', label: 'Job Type', type: 'select', required: true, options: [{ value: 'Full-Time', label: 'Full-Time' }, { value: 'Part-Time', label: 'Part-Time' }, { value: 'Internship', label: 'Internship' }] },
         { key: 'location', label: 'Location', type: 'text', required: true },
         { key: 'salary_min', label: 'Min Salary', type: 'number' },
@@ -297,7 +411,10 @@ export default function JobsManager() {
         { key: 'application_type', label: 'Application Type', type: 'toggle', onLabel: 'Internal App (CV upload)', offLabel: 'External Portal Link' },
         { key: 'apply_url', label: 'Apply URL (if External)', type: 'url', condition: (vals) => !vals.application_type },
         { key: 'deadline', label: 'Deadline', type: 'text', placeholder: 'YYYY-MM-DD' },
-        { key: 'status', label: 'Status', type: 'toggle', onLabel: 'Live', offLabel: 'Closed' }
+        {
+            key: 'status', label: 'Status', type: 'select', required: true,
+            options: [{ value: 'live', label: 'Live' }, { value: 'pending_review', label: 'Pending Review' }, { value: 'closed', label: 'Closed' }]
+        }
     ];
 
     // Apps View
@@ -378,14 +495,25 @@ export default function JobsManager() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
                 <StatCard title="Total Jobs" count={stats.total} icon="💼" color="#3B82F6" loading={loading} />
                 <StatCard title="Live" count={stats.live} icon="⚡" color="#10B981" loading={loading} />
-                <StatCard title="Featured" count={stats.featured} icon="⭐" color="#F59E0B" loading={loading} />
+                <StatCard title="Pending Review" count={stats.pendingReview} icon="⏳" color="#F59E0B" loading={loading} />
+                <StatCard title="Featured" count={stats.featured} icon="⭐" color="#8B5CF6" loading={loading} />
                 <StatCard title="Reported" count={stats.reported} icon="🚩" color="#EF4444" loading={loading} />
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+                <select
+                    value={companyFilter}
+                    onChange={e => setCompanyFilter(e.target.value)}
+                    style={{ padding: '0.55rem 0.9rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.85rem' }}
+                >
+                    {companyFilterOptions.map(c => <option key={c}>{c}</option>)}
+                </select>
             </div>
 
             <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 14, overflow: 'hidden', padding: '1.25rem', boxShadow: 'var(--shadow-sm)' }}>
                 <DataTable
                     columns={columns}
-                    rows={rows}
+                    rows={filteredRows}
                     loading={loading}
                     emptyMessage="No jobs found."
                     searchKeys={['title', 'company']}
@@ -418,12 +546,41 @@ export default function JobsManager() {
                 open={modal.open}
                 title={modal.mode === 'create' ? 'Post New Job' : `Edit: ${modal.row?.title}`}
                 fields={fields}
-                initialValues={modal.row ? { ...modal.row, status: modal.row.status === 'live', application_type: modal.row.application_type === 'internal' } : { status: true, application_type: true }}
+                initialValues={modal.row ? { ...modal.row, application_type: modal.row.application_type === 'internal' } : { status: 'pending_review', application_type: true }}
                 onSubmit={handleSaveJob}
                 onClose={() => setModal({ open: false, mode: 'create', row: null })}
                 submitLabel={modal.mode === 'create' ? 'Post Job' : 'Save Changes'}
                 loading={saving}
             />
+
+            {/* Inline "+ Add New Company" — a real, minimal quick-create so
+                the admin never has to leave the job form. Full company
+                details (logo, website, description) can be filled in later
+                from the Companies page. */}
+            {quickCompanyOpen && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 9500, background: 'rgba(15,23,42,0.4)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }} onClick={() => !savingQuickCompany && setQuickCompanyOpen(false)}>
+                    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '1.5rem', width: '100%', maxWidth: 380, boxShadow: 'var(--shadow-lg)' }} onClick={e => e.stopPropagation()}>
+                        <h3 style={{ margin: '0 0 0.25rem', fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)' }}>+ Add New Company</h3>
+                        <p style={{ margin: '0 0 1rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>Just the name for now — add logo, website and description later from the Companies page.</p>
+                        <input
+                            autoFocus
+                            value={quickCompanyName}
+                            onChange={e => setQuickCompanyName(e.target.value)}
+                            placeholder="Company name"
+                            disabled={savingQuickCompany}
+                            className="fm-input"
+                            style={{ width: '100%', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', borderRadius: 9, color: 'var(--text-primary)', padding: '0.65rem 0.9rem', fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }}
+                            onKeyDown={e => { if (e.key === 'Enter') handleQuickAddCompany(); }}
+                        />
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
+                            <button type="button" onClick={() => setQuickCompanyOpen(false)} disabled={savingQuickCompany} style={{ padding: '0.6rem 1.2rem', borderRadius: 9, background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer' }}>Cancel</button>
+                            <button type="button" onClick={handleQuickAddCompany} disabled={savingQuickCompany || !quickCompanyName.trim()} style={{ padding: '0.6rem 1.2rem', borderRadius: 9, background: 'var(--peacock-green)', border: 'none', color: '#fff', fontWeight: 700, fontSize: '0.85rem', cursor: savingQuickCompany ? 'not-allowed' : 'pointer', opacity: savingQuickCompany ? 0.7 : 1 }}>
+                                {savingQuickCompany ? 'Adding...' : 'Add Company'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

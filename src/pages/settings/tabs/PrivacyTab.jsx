@@ -45,13 +45,11 @@ export default function PrivacyTab({ user, showToast }) {
 
         setSaving(true);
         try {
-            console.log('DEBUG privacy_settings update payload:', { table: 'privacy_settings', update: changed, match: { user_id: user.id } });
             const { error } = await supabase.from('privacy_settings').update(changed).eq('user_id', user.id);
             if (error) throw error;
 
             // Keep profiles.privacy in sync if profile_visibility changed
             if ('profile_visibility' in changed) {
-                console.log('DEBUG profiles update payload:', { table: 'profiles', update: { privacy: changed.profile_visibility }, match: { id: user.id } });
                 const { error: profileError } = await supabase.from('profiles').update({ privacy: changed.profile_visibility }).eq('id', user.id);
                 if (profileError) throw profileError;
             }
@@ -59,19 +57,29 @@ export default function PrivacyTab({ user, showToast }) {
             setPrefs(draft);
             showToast('Preferences saved', 'success');
         } catch (err) {
-            console.error('Failed to update privacy settings:', { message: err.message, code: err.code, details: err.details, hint: err.hint, full: err });
+            console.error('Failed to update privacy settings:', err);
             showToast(err.message || 'Failed to save privacy settings', 'error');
         } finally {
             setSaving(false);
         }
     };
 
-    const handleExport = () => {
+    // Was a fake setTimeout claiming "we will email you a secure link" — no
+    // export was ever generated and no email was ever sent. Real data export
+    // isn't built (no Edge Function, no archive generation), so this is now
+    // a real notify-me subscription instead of a false claim of action taken —
+    // same real notify_subscribers pattern already used for 2FA (SecurityTab.jsx).
+    const handleExport = async () => {
         setExporting(true);
-        setTimeout(() => {
+        try {
+            const { error } = await supabase.from('notify_subscribers').insert({ email: user.email, feature_key: 'data_export' });
+            if (error && error.code !== '23505') throw error;
+            showToast("Data export isn't built yet — you're on the list to be notified when it is.", 'success');
+        } catch (err) {
+            showToast('Failed to join waitlist.', 'error');
+        } finally {
             setExporting(false);
-            showToast("Your data archive is being generated. We will email you a secure link.", 'success');
-        }, 1500);
+        }
     };
 
     if (loading) return <PageLoader message="Loading privacy settings..." />;
@@ -163,10 +171,12 @@ export default function PrivacyTab({ user, showToast }) {
             {/* Data Download */}
             <div style={{ background: 'var(--bg-surface)', padding: '2rem', borderRadius: 16, border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
                 <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 800 }}>Download Your Data</h2>
-                <p style={{ margin: '0 0 1.5rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Request an archive of your personal information, posts, and connections.</p>
-                
+                <p style={{ margin: '0 0 1.5rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                    Not built yet — this joins a real notify-me list instead of generating an archive that doesn't exist.
+                </p>
+
                 <button onClick={handleExport} disabled={exporting} style={{ background: 'transparent', border: '1px solid var(--peacock-green)', color: 'var(--peacock-green)', padding: '0.75rem 1.5rem', borderRadius: 8, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-                    {exporting ? <ButtonSpinner /> : <><span>📥</span> Export My Data</>}
+                    {exporting ? <ButtonSpinner /> : <><span>📥</span> Notify Me When Available</>}
                 </button>
             </div>
 

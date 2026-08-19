@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../supabaseClient.js';
 import DataTable from '../components/DataTable.jsx';
 import FormModal from '../components/FormModal.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 
+// 'cancelled' added as a real 4th status value — confirmed live it has no DB
+// check constraint blocking it (a real write-then-revert test succeeded),
+// it just wasn't wired into any admin UI option list before now.
 const STATUS_OPTIONS = [
     { value: 'coming_soon', label: '⏳ Coming Soon' },
     { value: 'live',        label: '🟢 Live'        },
     { value: 'completed',   label: '🏁 Completed'   },
+    { value: 'cancelled',   label: '🚫 Cancelled'    },
 ];
 
 const STATUS_COLORS = {
@@ -15,7 +20,20 @@ const STATUS_COLORS = {
     'coming soon': '#F59E0B',
     'live':        '#10B981',
     'completed':   '#94A3B8',
+    'cancelled':   '#EF4444',
 };
+
+// Status tabs — direct 1:1 with the real status vocabulary above (matches
+// the existing STATUS_OPTIONS the admin form already used, rather than
+// inventing date-math "happening now" semantics events.end_date can't
+// reliably support — confirmed live, end_date is null on every real row).
+const STATUS_TABS = [
+    { id: 'all', label: 'All' },
+    { id: 'coming_soon', label: 'Upcoming' },
+    { id: 'live', label: 'Live Now' },
+    { id: 'completed', label: 'Completed' },
+    { id: 'cancelled', label: 'Cancelled' },
+];
 
 /* ─────────────────────────────────────────────
    HELPERS
@@ -115,6 +133,7 @@ function EventStatusToggle({ status, busy, onClick }) {
    MAIN COMPONENT
 ───────────────────────────────────────────── */
 export default function EventsManager() {
+    const navigate = useNavigate();
     const [rows, setRows]         = useState([]);
     const [loading, setLoading]   = useState(true);
     const [modal, setModal]       = useState({ open: false, mode: 'create', row: null });
@@ -123,6 +142,8 @@ export default function EventsManager() {
     const [deleting, setDeleting] = useState(false);
     const [togglingId, setTogglingId] = useState(null); // id of event being quick-activated
     const [togglingFeaturedId, setTogglingFeaturedId] = useState(null);
+    const [statusTab, setStatusTab] = useState('all');
+    const [totalRegistrations, setTotalRegistrations] = useState(null);
 
     const [toast, setToast]       = useState(null);
     const toastTimer              = useRef(null);
@@ -143,9 +164,26 @@ export default function EventsManager() {
         if (error) showToast('Failed to load events: ' + error.message, 'error');
         setRows(data ?? []);
         setLoading(false);
+
+        // Real Total Registrations stat — event_registrations count, all statuses
+        // (confirmed/waitlisted), matching what the real Register Now flow writes.
+        const { count } = await supabase.from('event_registrations').select('*', { count: 'exact', head: true });
+        setTotalRegistrations(count ?? 0);
     }, []);
 
     useEffect(() => { load(); }, [load]);
+
+    // Real stat-card counts, derived from the same rows already loaded — no
+    // extra queries needed for these 5.
+    const stats = {
+        total: rows.length,
+        coming_soon: rows.filter(r => r.status?.toLowerCase() === 'coming_soon').length,
+        live: rows.filter(r => r.status?.toLowerCase() === 'live').length,
+        completed: rows.filter(r => r.status?.toLowerCase() === 'completed').length,
+        cancelled: rows.filter(r => r.status?.toLowerCase() === 'cancelled').length,
+    };
+
+    const filteredRows = statusTab === 'all' ? rows : rows.filter(r => r.status?.toLowerCase() === statusTab);
 
     /* ── Quick status toggle (Coming Soon <-> Live) ── */
     const handleToggleStatus = async (row) => {
@@ -178,11 +216,12 @@ export default function EventsManager() {
     };
 
     /* ── Modal handlers ── */
-    const openCreate = () => setModal({ open: true, mode: 'create', row: null });
+    // Create now lives at /admin/events/new (CreateEventWizard.jsx) — this
+    // FormModal is edit-only now, openCreate removed since nothing calls it.
     const openEdit   = (row) => setModal({ open: true, mode: 'edit', row });
     const closeModal = () => setModal(m => ({ ...m, open: false }));
 
-    /* ── Create / Update ── */
+    /* ── Update (edit-only — create moved to CreateEventWizard.jsx) ── */
     const handleSubmit = async (values) => {
         setSaving(true);
         try {
@@ -209,6 +248,14 @@ export default function EventsManager() {
                 uploadedImageUrl = urlData.publicUrl;
             }
 
+            // duration, team_size_limit, prize_details, accommodation_details, and
+            // itinerary were removed from this payload — confirmed live (PGRST204)
+            // that none of them are real columns on `events`. Every save was failing
+            // unconditionally because of this. The category-specific ideas behind
+            // them (Hackathon team size/prizes, Workation/Staycation accommodation/
+            // itinerary, a plain-text duration) are real and worth keeping, but
+            // need actual schema columns added first — not done in this urgent-fix
+            // pass. See the matching UI note below (condition on category).
             const payload = {
                 category:    values.category,
                 title:       values.title?.trim(),
@@ -222,24 +269,13 @@ export default function EventsManager() {
                 status:      values.status,
                 image_url:   uploadedImageUrl,
                 featured_on_landing: values.featured_on_landing ?? false,
-                duration:    values.duration?.trim() || null,
-                team_size_limit: values.team_size_limit?.trim() || null,
-                prize_details: values.prize_details?.trim() || null,
                 registration_deadline: values.registration_deadline ? new Date(values.registration_deadline).toISOString() : null,
-                accommodation_details: values.accommodation_details?.trim() || null,
-                itinerary:   values.itinerary?.trim() || null,
             };
 
-            let error;
-            if (modal.mode === 'create') {
-                ({ error } = await supabase.from('events').insert(payload));
-            } else {
-                ({ error } = await supabase.from('events').update(payload).eq('id', modal.row.id));
-            }
-
+            const { error } = await supabase.from('events').update(payload).eq('id', modal.row.id);
             if (error) throw error;
 
-            showToast(modal.mode === 'create' ? '✅ Event added!' : '✅ Event updated!');
+            showToast('✅ Event updated!');
             closeModal();
             load();
         } catch (err) {
@@ -281,12 +317,7 @@ export default function EventsManager() {
         status:      modal.row.status      ?? 'coming_soon',
         image:       modal.row.image_url   ?? null,
         featured_on_landing: modal.row.featured_on_landing ?? false,
-        duration:    modal.row.duration    ?? '',
-        team_size_limit: modal.row.team_size_limit ?? '',
-        prize_details: modal.row.prize_details ?? '',
         registration_deadline: formatToDatetimeLocal(modal.row.registration_deadline),
-        accommodation_details: modal.row.accommodation_details ?? '',
-        itinerary:   modal.row.itinerary   ?? '',
     } : { status: 'coming_soon', price: 0, featured_on_landing: false, category: '' };
 
     const CATEGORY_OPTIONS = [
@@ -300,8 +331,19 @@ export default function EventsManager() {
     ];
 
     const fields = [
-        { key: 'category', label: 'Event Category', type: 'select', required: true, options: CATEGORY_OPTIONS },
-        
+        {
+            key: 'category', label: 'Event Category', type: 'select', required: true, options: CATEGORY_OPTIONS,
+            // Real gap, flagged rather than silently dropped: duration (Workshop/
+            // Webinar/Debate), team size + prize details (Hackathon), and
+            // accommodation + itinerary (Workation/Staycation) all used to have
+            // form fields here, but none of those 5 columns exist on the real
+            // `events` table — every save was silently discarding that input and
+            // then failing outright (PGRST204) because the payload still tried to
+            // write them. Fields removed rather than left as fake/dead inputs.
+            // Worth adding as real columns in a future pass if these are wanted.
+            hint: 'Note: detailed per-category fields (team size & prizes for Hackathons, accommodation & itinerary for Workation/Staycation, duration for Workshop/Webinar/Debate) aren\'t collected yet — coming in a future update.',
+        },
+
         // Common Header
         { key: 'title', label: 'Event Title', type: 'text', required: true, placeholder: 'e.g. Developer Workation Goa 🌊', condition: v => !!v.category },
         { key: 'image', label: 'Event Banner Image', type: 'file', accept: 'image/*', condition: v => !!v.category },
@@ -311,17 +353,10 @@ export default function EventsManager() {
 
         // Workshop / Webinar / Debate / Other
         { key: 'host_name', label: 'Speaker / Host Name', type: 'text', placeholder: 'e.g. Park Ji-yeon', condition: v => !!v.category && v.category !== 'Hackathon' },
-        { key: 'duration', label: 'Duration', type: 'text', placeholder: 'e.g. 1 hour', condition: v => ['Workshop', 'Webinar', 'Debate'].includes(v.category) },
 
         // Hackathon
-        { key: 'team_size_limit', label: 'Team Size Limits', type: 'text', placeholder: 'e.g. 1-4 members', condition: v => v.category === 'Hackathon' },
-        { key: 'prize_details', label: 'Prize Details', type: 'textarea', placeholder: 'e.g. $1000 First Prize', condition: v => v.category === 'Hackathon' },
         { key: 'registration_deadline', label: 'Registration Deadline', type: 'datetime-local', condition: v => v.category === 'Hackathon' },
 
-        // Workation / Staycation
-        { key: 'accommodation_details', label: 'Accommodation Details', type: 'textarea', placeholder: 'e.g. 3 Nights in Zostel', condition: v => ['Workation', 'Staycation'].includes(v.category) },
-        { key: 'itinerary', label: 'Itinerary / Dates', type: 'textarea', placeholder: 'Day 1: Arrival...', condition: v => ['Workation', 'Staycation'].includes(v.category) },
-        
         // Common Footer
         { key: 'status', label: 'Status', type: 'select', required: true, options: STATUS_OPTIONS, condition: v => !!v.category },
         { key: 'price', label: 'Price (₹)', type: 'number', placeholder: '0', hint: 'Leave blank or 0 for free events.', condition: v => !!v.category },
@@ -434,7 +469,7 @@ export default function EventsManager() {
                 </div>
 
                 <button
-                    onClick={openCreate}
+                    onClick={() => navigate('/admin/events/new')}
                     style={{
                         padding: '0.65rem 1.35rem', borderRadius: 10, border: 'none',
                         background: 'var(--peacock-green)', color: '#fff', fontWeight: 700,
@@ -443,6 +478,49 @@ export default function EventsManager() {
                 >
                     + Add Event
                 </button>
+            </div>
+
+            {/* Stat cards — 5 real, derived from the same rows already loaded,
+                plus Total Registrations from a real event_registrations count.
+                No "Live Now" date-math and no fake numbers — see STATUS_TABS
+                comment above for why this mirrors the existing status vocabulary. */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                {[
+                    { key: 'total', label: 'Total Events', icon: '🎪', color: '#8B5CF6', value: stats.total },
+                    { key: 'coming_soon', label: 'Upcoming', icon: '⏳', color: '#F59E0B', value: stats.coming_soon },
+                    { key: 'live', label: 'Live Now', icon: '🟢', color: '#10B981', value: stats.live },
+                    { key: 'completed', label: 'Completed', icon: '🏁', color: '#94A3B8', value: stats.completed },
+                    { key: 'cancelled', label: 'Cancelled', icon: '🚫', color: '#EF4444', value: stats.cancelled },
+                    { key: 'registrations', label: 'Total Registrations', icon: '🎟️', color: '#3B82F6', value: totalRegistrations },
+                ].map(card => (
+                    <div key={card.key} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '1.1rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.5rem' }}>
+                            <span style={{ width: 30, height: 30, borderRadius: 8, background: `${card.color}18`, color: card.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.95rem' }}>{card.icon}</span>
+                            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>{card.label}</span>
+                        </div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                            {card.value === null ? '—' : card.value}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Status tabs */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+                {STATUS_TABS.map(tab => (
+                    <button
+                        key={tab.id}
+                        onClick={() => setStatusTab(tab.id)}
+                        style={{
+                            padding: '0.45rem 1rem', borderRadius: 20, fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer',
+                            background: statusTab === tab.id ? 'var(--peacock-green)' : 'var(--bg-surface)',
+                            color: statusTab === tab.id ? '#fff' : 'var(--text-secondary)',
+                            border: `1px solid ${statusTab === tab.id ? 'var(--peacock-green)' : 'var(--border-color)'}`,
+                        }}
+                    >
+                        {tab.label}
+                    </button>
+                ))}
             </div>
 
             {/* Table */}
@@ -454,7 +532,7 @@ export default function EventsManager() {
             }}>
                 <DataTable
                     columns={columns}
-                    rows={rows}
+                    rows={filteredRows}
                     loading={loading}
                     emptyMessage="No events yet. Click '+ Add Event' to list the first one."
                     searchKeys={['title', 'host_name', 'location', 'status']}
@@ -467,15 +545,15 @@ export default function EventsManager() {
                 />
             </div>
 
-            {/* Shared Form Modal */}
+            {/* Shared Form Modal — edit-only now */}
             <FormModal
                 open={modal.open}
-                title={modal.mode === 'create' ? '+ Add Event' : `Edit: ${modal.row?.title}`}
+                title={`Edit: ${modal.row?.title}`}
                 fields={fields}
                 initialValues={initialValues}
                 onSubmit={handleSubmit}
                 onClose={closeModal}
-                submitLabel={modal.mode === 'create' ? 'Add Event' : 'Save Changes'}
+                submitLabel="Save Changes"
                 loading={saving}
             />
 

@@ -1,26 +1,10 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar.jsx';
 import Footer from '../components/Footer.jsx';
+import SEO from '../components/SEO.jsx';
 
 export default function ShippingAndDelivery() {
-    useEffect(() => {
-        const originalTitle = document.title;
-        const metaDesc = document.querySelector('meta[name="description"]');
-        const originalDesc = metaDesc ? metaDesc.getAttribute('content') : '';
-
-        document.title = "Shipping and Delivery Policy | Chavee";
-        if (metaDesc) {
-            metaDesc.setAttribute('content', "Chavee is a fully digital platform. Learn how our digital services, features, and content are delivered to users — no physical shipping involved.");
-        }
-
-        return () => {
-            document.title = originalTitle;
-            if (metaDesc) {
-                metaDesc.setAttribute('content', originalDesc);
-            }
-        };
-    }, []);
 
     const S = {
         wrapper: {
@@ -115,6 +99,11 @@ export default function ShippingAndDelivery() {
 
     return (
         <div style={S.wrapper}>
+            <SEO
+                title="Shipping and Delivery Policy | Chavee"
+                description="Chavee is a fully digital platform. Learn how our digital services, features, and content are delivered to users — no physical shipping involved."
+                path="/shipping-and-delivery"
+            />
             <Navbar />
 
             {/* Hero */}
@@ -216,8 +205,8 @@ export default function ShippingAndDelivery() {
                     </p>
                     <p style={S.p}>
                         <span style={S.strong}>Chavee</span><br />
-                        Adimaparambil House, Ponmundam PO, Ponmundam<br />
-                        Tirur, Kerala 676106, India<br />
+                        2nd Floor, West End Tower, T. P. Road, Calicut<br />
+                        Kerala - 673004, India<br />
                         Email: <a href="mailto:info@chavee.in" style={S.link}>info@chavee.in</a>
                     </p>
                     <p style={S.p}>

@@ -126,6 +126,96 @@ export default function FormModal({
                         ))}
                     </select>
                 );
+            // Same as 'select', plus an adjacent inline action button (e.g.
+            // "+ Add New Company") — f.onAction()/f.actionLabel control it.
+            case 'select_with_action':
+                return (
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <select
+                            {...common}
+                            onChange={e => set(f.key, e.target.value)}
+                            style={{ cursor: 'pointer', flex: 1 }}
+                        >
+                            <option value="">— Select —</option>
+                            {f.options?.map(o => (
+                                <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                        </select>
+                        {f.onAction && (
+                            <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={f.onAction}
+                                style={{
+                                    padding: '0 0.9rem', borderRadius: 9, whiteSpace: 'nowrap',
+                                    background: 'var(--bg-mint)', border: '1px solid var(--border-mint)',
+                                    color: 'var(--peacock-green)', fontWeight: 700, fontSize: '0.8rem',
+                                    cursor: isBusy ? 'not-allowed' : 'pointer',
+                                }}
+                            >
+                                {f.actionLabel || '+ Add New'}
+                            </button>
+                        )}
+                    </div>
+                );
+            // Searchable profile/record picker: text search over f.options
+            // ({value,label}), click a match to select it (stored as
+            // values[f.key]), or clear to go back to unset/null. Search
+            // text itself lives in values[`${f.key}__q`] so it survives
+            // without needing extra component state.
+            case 'user_search': {
+                const options = f.options || [];
+                const selected = options.find(o => o.value === val);
+                const qKey = `${f.key}__q`;
+                const query = (values[qKey] || '').trim().toLowerCase();
+                const matches = query
+                    ? options.filter(o => o.label.toLowerCase().includes(query)).slice(0, 8)
+                    : [];
+                if (selected) {
+                    return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'var(--bg-mint)', border: '1px solid var(--border-mint)', borderRadius: 9, padding: '0.55rem 0.9rem' }}>
+                            <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: 700, color: 'var(--peacock-green)' }}>{selected.label}</span>
+                            <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => { set(f.key, ''); set(qKey, ''); }}
+                                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 700 }}
+                            >✕ Clear</button>
+                        </div>
+                    );
+                }
+                return (
+                    <div style={{ position: 'relative' }}>
+                        <input
+                            {...common}
+                            type="text"
+                            value={values[qKey] || ''}
+                            placeholder={f.placeholder || 'Search by name or username…'}
+                            onChange={e => set(qKey, e.target.value)}
+                        />
+                        {query && (
+                            <div style={{
+                                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                                marginTop: 4, background: 'var(--bg-surface)', border: '1px solid var(--border-color)',
+                                borderRadius: 9, boxShadow: 'var(--shadow-lg)', maxHeight: 200, overflowY: 'auto',
+                            }}>
+                                {matches.length === 0 && (
+                                    <div style={{ padding: '0.6rem 0.9rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>No matches.</div>
+                                )}
+                                {matches.map(o => (
+                                    <div
+                                        key={o.value}
+                                        onClick={() => { set(f.key, o.value); set(qKey, ''); }}
+                                        style={{ padding: '0.55rem 0.9rem', fontSize: '0.85rem', cursor: 'pointer', color: 'var(--text-primary)' }}
+                                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                    >{o.label}</div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                );
+            }
             case 'toggle':
                 return (
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 
 const ICONS = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
 const BORDER_COLORS = {
@@ -8,12 +8,42 @@ const BORDER_COLORS = {
     warning: 'rgba(245,158,11,0.4)',
 };
 
+const DEFAULT_BOTTOM = '2rem';
+
 /**
  * Toast — floating notification
  * Props: { message, type, show, onHide }
  * type: 'success' | 'error' | 'info' | 'warning'
  */
 export default function Toast({ message, type = 'success', show, onHide }) {
+    // Mobile clearance for AppShell.jsx's persistent bottom tab bar
+    // (.mobile-bottom-nav, fixed, <768px only — see AppShell.jsx). Measured
+    // from the bar's real rendered height rather than a guessed pixel value,
+    // so this stays correct if the bar's own height or safe-area padding
+    // ever changes without needing a matching edit here. The bar's own
+    // height already includes its env(safe-area-inset-bottom) padding, so
+    // clearing it fully already respects the safe area the same way the bar
+    // itself does — no separate safe-area calc needed on top.
+    // Falls back to the original 2rem when the bar isn't in the DOM at all
+    // (e.g. the logged-out Landing page, which doesn't render AppShell) or
+    // is hidden (desktop, ≥769px — unchanged from before this fix).
+    const [bottomOffset, setBottomOffset] = useState(DEFAULT_BOTTOM);
+
+    useEffect(() => {
+        const measure = () => {
+            const bar = document.querySelector('.mobile-bottom-nav');
+            if (bar && getComputedStyle(bar).display !== 'none') {
+                const barHeight = bar.getBoundingClientRect().height;
+                setBottomOffset(`calc(${barHeight}px + 1rem)`);
+            } else {
+                setBottomOffset(DEFAULT_BOTTOM);
+            }
+        };
+        measure();
+        window.addEventListener('resize', measure);
+        return () => window.removeEventListener('resize', measure);
+    }, [show]);
+
     useEffect(() => {
         if (!show) return;
         const t = setTimeout(() => onHide?.(), 4000);
@@ -25,7 +55,7 @@ export default function Toast({ message, type = 'success', show, onHide }) {
     return (
         <div style={{
             position: 'fixed',
-            bottom: '2rem',
+            bottom: bottomOffset,
             right: '2rem',
             zIndex: 99999,
             background: 'rgba(15,23,42,0.95)',

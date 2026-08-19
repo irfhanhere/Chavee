@@ -1,52 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Navbar from '../components/Navbar.jsx';
 import Footer from '../components/Footer.jsx';
 import { supabase } from '../supabaseClient.js';
 import { ButtonSpinner } from '../components/Spinner.jsx';
+import SEO from '../components/SEO.jsx';
 
-const MOCK_BLOGS = [
-    {
-        id: 'b1',
-        title: 'How to Earn Your First ₹10,000 as a College Student',
-        summary: 'Freelancing in college is easier than you think. Here is a step-by-step guide to finding your first gig using your skills.',
-        body: `Many college students in India want to make their own money but don't know where to start. Between classes, exams, and projects, full-time jobs are out of the question. That's where freelance gigs come in.\n\nIn this article, we outline exactly how to list your skills, price your services, and attract your first paying clients. Whether you do web development, UI/UX design, translation, or content writing, there is someone ready to pay for your work on Chavee.`,
-        category: 'Freelancing',
-        author: 'Rohan Das',
-        created_at: '2026-07-15T10:00:00Z',
-        image_url: 'https://images.unsplash.com/photo-1515378791036-0648a3ef77b2?w=800&auto=format&fit=crop&q=60'
-    },
-    {
-        id: 'b2',
-        title: 'Mastering Korean: Why Indian Students are Learning Hangul',
-        summary: 'From K-Pop to high-paying translation jobs, explore why Korean has become the hottest language to learn in India.',
-        body: `Over the past few years, the Hallyu wave has swept across India. Students aren't just watching K-Dramas and listening to K-Pop; they are actively learning the Korean language.\n\nFluency in Korean opens doors to translation gigs, roles in multinational corporations, and study abroad scholarships in South Korea. At Chavee, our live sessions with native tutors April Kim and Leehan help students go from absolute beginners to fluent speakers fast.`,
-        category: 'Languages',
-        author: 'Keerthi Suresh',
-        created_at: '2026-07-12T14:30:00Z',
-        image_url: 'https://images.unsplash.com/photo-1543165796-5426273eaab3?w=800&auto=format&fit=crop&q=60'
-    },
-    {
-        id: 'b3',
-        title: 'Study Sync: The Power of Peer-to-Peer Mentoring',
-        summary: 'Why peer mentorship beats traditional tutoring and how to find the perfect study partner in your college circle.',
-        body: `Struggling with engineering math or coding concepts? Sometimes, a professor's lecture isn't enough. Learning from a senior who recently aced the exact same course is often the fastest way to understand complex subjects.\n\nChavee's Study Sync matches you with verified peer mentors in your university within 24 hours. Learn together, practice problems, and level up your grades without spending a fortune.`,
-        category: 'Mentorship',
-        author: 'April Kim',
-        created_at: '2026-07-09T09:15:00Z',
-        image_url: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=800&auto=format&fit=crop&q=60'
-    }
-];
+const PAGE_SIZE = 6;
 
 export default function Blog() {
     const [blogs, setBlogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedBlog, setSelectedBlog] = useState(null);
     const [categoryFilter, setCategoryFilter] = useState('All');
+    const [authorFilter, setAuthorFilter] = useState('All Authors');
+    const [sort, setSort] = useState('latest');
+    const [search, setSearch] = useState('');
+    const [page, setPage] = useState(1);
 
     const loadBlogs = async () => {
         setLoading(true);
         try {
-            // Attempt to load from Supabase blogs table
             const { data, error } = await supabase
                 .from('content')
                 .select('*')
@@ -55,21 +28,10 @@ export default function Blog() {
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            
-            if (data && data.length > 0) {
-                setBlogs(data);
-            } else {
-                setBlogs(MOCK_BLOGS);
-            }
+            setBlogs(data || []);
         } catch (err) {
-            console.warn('Supabase blogs table not ready/found, loading local blogs:', err.message);
-            // Fallback to local storage + mock data
-            const local = localStorage.getItem('chavee_blogs');
-            if (local) {
-                setBlogs(JSON.parse(local));
-            } else {
-                setBlogs(MOCK_BLOGS);
-            }
+            console.warn('Could not load blogs:', err.message);
+            setBlogs([]);
         } finally {
             setLoading(false);
         }
@@ -77,46 +39,59 @@ export default function Blog() {
 
     useEffect(() => {
         loadBlogs();
-        document.title = 'Chavee Blog | Learn Earn Network Belong';
     }, []);
 
-    useEffect(() => {
-        if (selectedBlog) {
-            const originalTitle = document.title;
-            const originalDesc = document.querySelector('meta[name="description"]')?.getAttribute('content') || '';
-            const originalKeywords = document.querySelector('meta[name="keywords"]')?.getAttribute('content') || '';
+    // Reactive, not imperative — Helmet just renders whatever these resolve
+    // to on each render, so there's no manual "restore the original title"
+    // cleanup needed the way the old direct-DOM-mutation version required.
+    // Canonical always stays "/blog": there's no per-post route (posts open
+    // in a modal, not a real URL), so a per-post canonical would be fake.
+    const seoTitle = selectedBlog
+        ? (selectedBlog.seo_title || `${selectedBlog.title} | Chavee Blog`)
+        : 'Chavee Blog | Learn Earn Network Belong';
+    const seoDescription = selectedBlog
+        ? (selectedBlog.seo_description || selectedBlog.summary || '')
+        : 'Real stories, guides and updates from the Chavee student community — career advice, gig-economy tips, campus life, and platform news.';
+    const seoKeywords = selectedBlog
+        ? (selectedBlog.seo_keywords || `chavee blog, student stories, ${selectedBlog.category}`)
+        : undefined;
 
-            // Update with custom SEO tags or fallback
-            document.title = selectedBlog.seo_title || `${selectedBlog.title} | Chavee Blog`;
-            
-            let metaDesc = document.querySelector('meta[name="description"]');
-            if (!metaDesc) {
-                metaDesc = document.createElement('meta');
-                metaDesc.setAttribute('name', 'description');
-                document.head.appendChild(metaDesc);
-            }
-            metaDesc.setAttribute('content', selectedBlog.seo_description || selectedBlog.summary || '');
+    // Real distinct categories/authors from the actual loaded posts — not
+    // hardcoded lists (same lesson as Careers' department-filter fix).
+    const categories = useMemo(() => ['All', ...new Set(blogs.map(b => b.category).filter(Boolean))], [blogs]);
+    const authors = useMemo(() => ['All Authors', ...new Set(blogs.map(b => b.author).filter(Boolean))], [blogs]);
 
-            let metaKeywords = document.querySelector('meta[name="keywords"]');
-            if (!metaKeywords) {
-                metaKeywords = document.createElement('meta');
-                metaKeywords.setAttribute('name', 'keywords');
-                document.head.appendChild(metaKeywords);
-            }
-            metaKeywords.setAttribute('content', selectedBlog.seo_keywords || `chavee blog, student stories, ${selectedBlog.category}`);
+    // "Popular" ranking: by real views if any post actually has views > 0,
+    // otherwise fall back to recency — never a fabricated popularity number.
+    const viewsArePopulated = useMemo(() => blogs.some(b => (b.views || 0) > 0), [blogs]);
+    const popularPosts = useMemo(() => {
+        const sorted = [...blogs].sort((a, b) => viewsArePopulated
+            ? (b.views || 0) - (a.views || 0)
+            : new Date(b.created_at) - new Date(a.created_at));
+        return sorted.slice(0, 5);
+    }, [blogs, viewsArePopulated]);
 
-            return () => {
-                document.title = originalTitle;
-                if (metaDesc) metaDesc.setAttribute('content', originalDesc);
-                if (metaKeywords) metaKeywords.setAttribute('content', originalKeywords);
-            };
+    const filteredBlogs = useMemo(() => {
+        let list = blogs;
+        if (categoryFilter !== 'All') list = list.filter(b => b.category === categoryFilter);
+        if (authorFilter !== 'All Authors') list = list.filter(b => b.author === authorFilter);
+        if (search.trim()) {
+            const term = search.trim().toLowerCase();
+            list = list.filter(b => b.title?.toLowerCase().includes(term) || b.summary?.toLowerCase().includes(term));
         }
-    }, [selectedBlog]);
+        list = [...list].sort((a, b) => {
+            if (sort === 'oldest') return new Date(a.created_at) - new Date(b.created_at);
+            if (sort === 'most_viewed') return (b.views || 0) - (a.views || 0);
+            return new Date(b.created_at) - new Date(a.created_at); // latest (default)
+        });
+        return list;
+    }, [blogs, categoryFilter, authorFilter, search, sort]);
 
-    const categories = ['All', ...new Set(blogs.map(b => b.category))];
-    const filteredBlogs = categoryFilter === 'All'
-        ? blogs
-        : blogs.filter(b => b.category === categoryFilter);
+    // Real pagination over the real filtered count — resets to page 1 on
+    // any filter/search/sort change so the user never lands on an empty page.
+    useEffect(() => { setPage(1); }, [categoryFilter, authorFilter, search, sort]);
+    const totalPages = Math.max(1, Math.ceil(filteredBlogs.length / PAGE_SIZE));
+    const pagedBlogs = filteredBlogs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
     const S = {
         hero: {
@@ -126,7 +101,7 @@ export default function Blog() {
             textAlign: 'center'
         },
         container: {
-            maxWidth: 1100,
+            maxWidth: 1200,
             margin: '0 auto',
             padding: '3rem 1.5rem'
         },
@@ -149,11 +124,16 @@ export default function Blog() {
             fontSize: '0.74rem',
             fontWeight: 700,
             display: 'inline-block'
+        },
+        select: {
+            padding: '0.5rem 0.85rem', borderRadius: 10, border: '1px solid var(--border-color)',
+            background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '0.82rem', fontWeight: 600
         }
     };
 
     return (
         <div style={{ background: 'var(--bg-base)', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+            <SEO title={seoTitle} description={seoDescription} keywords={seoKeywords} path="/blog" />
             <Navbar />
 
             {/* Hero */}
@@ -165,9 +145,29 @@ export default function Blog() {
                 </p>
             </header>
 
-            {/* Filter tab */}
             <div style={S.container}>
-                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                {/* Search + Category + Author + Sort */}
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+                    <div style={{ flex: 1, minWidth: 220, display: 'flex', alignItems: 'center', gap: '0.6rem', ...S.card, cursor: 'default', padding: '0.6rem 1rem' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>🔍</span>
+                        <input
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            placeholder="Search blogs..."
+                            style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: '0.85rem', color: 'var(--text-primary)', fontFamily: 'inherit' }}
+                        />
+                    </div>
+                    <select value={authorFilter} onChange={e => setAuthorFilter(e.target.value)} style={S.select}>
+                        {authors.map(a => <option key={a}>{a}</option>)}
+                    </select>
+                    <select value={sort} onChange={e => setSort(e.target.value)} style={S.select}>
+                        <option value="latest">Latest</option>
+                        <option value="oldest">Oldest</option>
+                        <option value="most_viewed">Most Viewed</option>
+                    </select>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
                     {categories.map(cat => (
                         <button
                             key={cat}
@@ -189,54 +189,114 @@ export default function Blog() {
                     ))}
                 </div>
 
-                {/* Blogs Grid */}
                 {loading ? (
                     <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
                         <ButtonSpinner label="Loading stories..." />
                     </div>
-                ) : filteredBlogs.length === 0 ? (
+                ) : blogs.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
-                        No articles found in this category.
+                        No blog posts published yet. Check back soon.
                     </div>
                 ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))', gap: '2rem' }}>
-                        {filteredBlogs.map(b => (
-                            <div
-                                key={b.id}
-                                style={S.card}
-                                onClick={() => setSelectedBlog(b)}
-                                onMouseEnter={e => {
-                                    e.currentTarget.style.transform = 'translateY(-4px)';
-                                    e.currentTarget.style.boxShadow = 'var(--shadow-md)';
-                                }}
-                                onMouseLeave={e => {
-                                    e.currentTarget.style.transform = 'none';
-                                    e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
-                                }}
-                            >
-                                <div style={{ height: 180, width: '100%', overflow: 'hidden', background: 'var(--bg-elevated)' }}>
-                                    <img
-                                        src={b.image_url || 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=800&auto=format&fit=crop&q=60'}
-                                        alt={b.title}
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                    />
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '2rem', alignItems: 'start' }}>
+                        {/* Main content */}
+                        <div style={{ gridColumn: 'span 3', minWidth: 0 }}>
+                            {filteredBlogs.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                                    No articles match your search or filters.
                                 </div>
-                                <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1 }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <span style={S.badge}>{b.category}</span>
+                            ) : (
+                                <>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '2rem', marginBottom: '2rem' }}>
+                                        {pagedBlogs.map(b => (
+                                            <div
+                                                key={b.id}
+                                                style={S.card}
+                                                onClick={() => setSelectedBlog(b)}
+                                                onMouseEnter={e => {
+                                                    e.currentTarget.style.transform = 'translateY(-4px)';
+                                                    e.currentTarget.style.boxShadow = 'var(--shadow-md)';
+                                                }}
+                                                onMouseLeave={e => {
+                                                    e.currentTarget.style.transform = 'none';
+                                                    e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+                                                }}
+                                            >
+                                                <div style={{ height: 180, width: '100%', overflow: 'hidden', background: 'var(--bg-elevated)' }}>
+                                                    <img
+                                                        src={b.image_url || 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=800&auto=format&fit=crop&q=60'}
+                                                        alt={b.title}
+                                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                    />
+                                                </div>
+                                                <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1 }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                        <span style={S.badge}>{b.category}</span>
+                                                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                                            {new Date(b.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                                                        </span>
+                                                    </div>
+                                                    <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, lineHeight: 1.4, color: 'var(--text-primary)' }}>{b.title}</h3>
+                                                    <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0, flex: 1 }}>{b.summary}</p>
+                                                    <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                        <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-secondary)' }}>By {b.author}</span>
+                                                        <span style={{ fontSize: '0.78rem', color: 'var(--peacock-green)', fontWeight: 800 }}>Read Article →</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Pagination — real, reflects the real filtered count */}
+                                    {totalPages > 1 && (
+                                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }}>
+                                            <button
+                                                onClick={() => setPage(p => Math.max(1, p - 1))}
+                                                disabled={page === 1}
+                                                style={{ padding: '0.5rem 0.9rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', cursor: page === 1 ? 'not-allowed' : 'pointer', opacity: page === 1 ? 0.5 : 1 }}
+                                            >‹</button>
+                                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                                                <button
+                                                    key={p}
+                                                    onClick={() => setPage(p)}
+                                                    style={{
+                                                        padding: '0.5rem 0.9rem', borderRadius: 8, border: `1px solid ${p === page ? 'var(--peacock-green)' : 'var(--border-color)'}`,
+                                                        background: p === page ? 'var(--peacock-green)' : 'var(--bg-surface)', color: p === page ? '#fff' : 'var(--text-primary)',
+                                                        fontWeight: 700, cursor: 'pointer'
+                                                    }}
+                                                >{p}</button>
+                                            ))}
+                                            <button
+                                                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                                disabled={page === totalPages}
+                                                style={{ padding: '0.5rem 0.9rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', cursor: page === totalPages ? 'not-allowed' : 'pointer', opacity: page === totalPages ? 0.5 : 1 }}
+                                            >›</button>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+
+                        {/* Popular Posts sidebar */}
+                        <div style={{ ...S.card, cursor: 'default', padding: '1.25rem' }}>
+                            <h3 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                🔥 Popular Posts
+                            </h3>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+                                {popularPosts.map(p => (
+                                    <button
+                                        key={p.id}
+                                        onClick={() => setSelectedBlog(p)}
+                                        style={{ textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}
+                                    >
+                                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.4 }}>{p.title}</span>
                                         <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                            {new Date(b.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                                            {viewsArePopulated ? `${p.views || 0} views` : new Date(p.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                                         </span>
-                                    </div>
-                                    <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, lineHeight: 1.4, color: 'var(--text-primary)' }}>{b.title}</h3>
-                                    <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0, flex: 1 }}>{b.summary}</p>
-                                    <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-secondary)' }}>By {b.author}</span>
-                                        <span style={{ fontSize: '0.78rem', color: 'var(--peacock-green)', fontWeight: 800 }}>Read Article →</span>
-                                    </div>
-                                </div>
+                                    </button>
+                                ))}
                             </div>
-                        ))}
+                        </div>
                     </div>
                 )}
             </div>
@@ -280,7 +340,7 @@ export default function Blog() {
                             <h2 style={{ fontSize: '1.5rem', fontWeight: 900, margin: 0, color: 'var(--text-primary)' }}>{selectedBlog.title}</h2>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
                                 <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--peacock-green)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.75rem' }}>
-                                    {selectedBlog.author[0]}
+                                    {selectedBlog.author?.[0]}
                                 </div>
                                 <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Written by {selectedBlog.author}</span>
                             </div>

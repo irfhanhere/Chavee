@@ -73,7 +73,14 @@ export default function Network() {
         navigate('/network');
     };
 
-    const tabs = ['Communities', 'Connect with Peers', 'Study Sync'];
+    // id matches the existing activeTab state values used below (line ~140's
+    // conditional render) — only the display label changes ("Peer", not
+    // "Connect with Peers"), so nothing downstream needs to change.
+    const tabs = [
+        { id: 'Communities', label: 'Communities', icon: '💼', iconBg: 'var(--bg-mint)', desc: 'Join topic-based communities' },
+        { id: 'Connect with Peers', label: 'Peer', icon: '👥', iconBg: 'rgba(217,119,6,0.12)', desc: 'Connect with students' },
+        { id: 'Study Sync', label: 'Study Sync', icon: '📖', iconBg: 'rgba(99,102,241,0.12)', desc: 'Find study partners & groups' },
+    ];
 
     return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -93,22 +100,38 @@ export default function Network() {
                         {/* Global Search can go here */}
                     </div>
 
-                    {/* Tabs */}
-                    <div style={{ display: 'flex', gap: '1.5rem', padding: '0 1.5rem', overflowX: 'auto', scrollbarWidth: 'none' }}>
+                    {/* Tabs — card-grid style adapted from Earn.jsx's real tab selector
+                        (Earn.jsx:2124-2145: icon badge + bold title + description line,
+                        active = 2px green border + 4px green bottom border). Earn lays
+                        its 4 tabs out as a 2x2 grid; here it's 3 tabs in one row instead
+                        of wrapping. NOT reusing S.tabBtn (Earn.jsx:98) — that's a dead,
+                        unused pill-button style, unrelated to Earn's actual tab UI. */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', padding: '0 1.5rem 1.25rem' }}>
                         {tabs.map(tab => (
                             <button
-                                key={tab}
-                                onClick={() => setActiveTab(tab)}
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
                                 style={{
-                                    background: 'none', border: 'none', padding: '0.75rem 0',
-                                    color: activeTab === tab ? 'var(--peacock-green)' : 'var(--text-muted)',
-                                    fontWeight: activeTab === tab ? 800 : 600,
-                                    fontSize: '0.95rem', cursor: 'pointer',
-                                    borderBottom: activeTab === tab ? '2px solid var(--peacock-green)' : '2px solid transparent',
-                                    whiteSpace: 'nowrap'
+                                    textAlign: 'left',
+                                    background: 'var(--bg-surface)',
+                                    border: activeTab === tab.id ? '2px solid var(--peacock-green)' : '1px solid var(--border-color)',
+                                    borderBottom: activeTab === tab.id ? '4px solid var(--peacock-green)' : '1px solid var(--border-color)',
+                                    borderRadius: 14,
+                                    padding: '1rem 0.85rem',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '0.5rem',
                                 }}
                             >
-                                {tab}
+                                <span style={{
+                                    width: 36, height: 36, borderRadius: '50%', background: tab.iconBg,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem'
+                                }}>
+                                    {tab.icon}
+                                </span>
+                                <span style={{ fontWeight: 800, fontSize: '0.9rem', color: 'var(--text-primary)' }}>{tab.label}</span>
+                                <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.3 }}>{tab.desc}</span>
                             </button>
                         ))}
                     </div>

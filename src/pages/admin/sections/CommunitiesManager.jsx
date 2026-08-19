@@ -210,13 +210,20 @@ export default function CommunitiesManager() {
     };
 
     const handleQuickStatus = async (id, status) => {
+        // Returns a real success boolean (in addition to its existing toast/reload
+        // side effects) so callers that need to know whether it actually worked —
+        // like the Overview tab's local status mirror — don't optimistically update
+        // on a call that silently failed. Existing call site (the list row's
+        // Archive button) ignores the return value, unaffected.
         try {
             const { error } = await supabase.from('communities').update({ status }).eq('id', id);
             if (error) throw error;
             showToast('Status updated');
             loadData();
+            return true;
         } catch (err) {
             showToast('Update failed: ' + err.message, 'error');
+            return false;
         }
     };
 
@@ -316,7 +323,7 @@ export default function CommunitiesManager() {
     ];
 
     if (viewingCommunity) {
-        return <CommunityDetails comm={viewingCommunity} onBack={() => { setViewingCommunity(null); loadData(); }} showToast={showToast} />;
+        return <CommunityDetails comm={viewingCommunity} onBack={() => { setViewingCommunity(null); loadData(); }} showToast={showToast} onQuickStatus={handleQuickStatus} />;
     }
 
     // Pie chart slices calculation
@@ -526,13 +533,25 @@ export default function CommunitiesManager() {
 // DETAILS COMPONENT & TABS
 // ─────────────────────────────────────────────
 
-function CommunityDetails({ comm, onBack, showToast }) {
+function CommunityDetails({ comm, onBack, showToast, onQuickStatus }) {
     const [activeTab, setActiveTab] = useState('overview');
+    // Local mirror of comm.status — onQuickStatus (the list page's real handler)
+    // updates the LIST's data on success, not this already-opened comm object,
+    // so without this the header/status card would show a stale status until
+    // the admin backs out and reopens the page. Updated optimistically right
+    // after a successful call so Archive/Change Status visibly reflect here.
+    const [status, setStatus] = useState(comm.status);
+
+    const handleStatusChange = async (newStatus) => {
+        const ok = await onQuickStatus(comm.id, newStatus);
+        if (ok) setStatus(newStatus); // don't reflect a call that actually failed
+    };
 
     const TABS = [
         { id: 'overview', label: 'Overview' },
         { id: 'members', label: 'Members' },
         { id: 'posts', label: 'Posts' },
+        { id: 'channels', label: 'Channels' },
         { id: 'events', label: 'Events' },
         { id: 'resources', label: 'Resources' },
         { id: 'analytics', label: 'Analytics' },
@@ -556,7 +575,7 @@ function CommunityDetails({ comm, onBack, showToast }) {
                     <div style={{ paddingTop: '2.5rem', flex: 1 }}>
                         <h2 style={{ margin: '0 0 0.25rem', fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)' }}>{comm.name}</h2>
                         <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                            {comm.category} • {comm.member_count} Members • Status: {comm.status}
+                            {comm.category} • {comm.member_count} Members • Status: {status}
                         </p>
                     </div>
                 </div>
@@ -579,9 +598,10 @@ function CommunityDetails({ comm, onBack, showToast }) {
             </div>
 
             <div>
-                {activeTab === 'overview' && <OverviewTab comm={comm} />}
+                {activeTab === 'overview' && <OverviewTab comm={comm} status={status} onStatusChange={handleStatusChange} setActiveTab={setActiveTab} />}
                 {activeTab === 'members' && <MembersTab comm={comm} showToast={showToast} />}
                 {activeTab === 'posts' && <PostsTab comm={comm} showToast={showToast} />}
+                {activeTab === 'channels' && <ChannelsTab comm={comm} showToast={showToast} />}
                 {activeTab === 'events' && <EventsTab comm={comm} />}
                 {activeTab === 'resources' && <ResourcesTab comm={comm} showToast={showToast} />}
                 {activeTab === 'analytics' && <AnalyticsTab comm={comm} />}
@@ -594,16 +614,225 @@ function CommunityDetails({ comm, onBack, showToast }) {
 
 // ---- Sub Tabs ----
 
-function OverviewTab({ comm }) {
+// Real card queries only. Active Members and Events This Month are
+// intentionally omitted — confirmed no honest data source exists for
+// either (profiles.last_active_at is never written by any real code path;
+// zero real `events` rows have a non-null community_id anywhere, and no
+// UI anywhere — admin or user-facing — can create one). Faking either
+// with a placeholder would be worse than not showing the card at all.
+const STAT_CARDS = [
+    { key: 'members', label: 'Total Members', icon: '👥', color: '#8B5CF6' },
+    { key: 'posts', label: 'Total Posts', icon: '📝', color: '#3B82F6' },
+    { key: 'discussions', label: 'Total Discussions', icon: '💬', color: '#10B981' },
+    { key: 'reportsPending', label: 'Reports Pending', icon: '🚩', color: '#EF4444' },
+];
+
+const TAB_HELP = [
+    { icon: '🏠', label: 'Overview', desc: 'Community summary, stats, quick actions and danger zone.' },
+    { icon: '👥', label: 'Members', desc: 'View all members, manage roles, remove or ban.' },
+    { icon: '📝', label: 'Posts', desc: 'View all posts, pin or delete.' },
+    { icon: '💬', label: 'Channels', desc: 'View discussion channels, delete inactive or spam ones.' },
+    { icon: '📅', label: 'Events', desc: 'View events linked to this community.' },
+    { icon: '📚', label: 'Resources', desc: 'Add or remove shared resources.' },
+    { icon: '📈', label: 'Analytics', desc: 'Member growth and engagement aggregations.' },
+    { icon: '🚩', label: 'Reports', desc: 'Review and resolve reported posts.' },
+    { icon: '⚙️', label: 'Settings', desc: 'Edit details, change status, danger zone actions.' },
+];
+
+const WORKFLOW_STEPS = [
+    { n: 1, label: 'Monitor', desc: 'Check stats and reports on this Overview tab regularly.' },
+    { n: 2, label: 'Moderate', desc: 'Review flagged posts in Reports, remove spam channels in Channels.' },
+    { n: 3, label: 'Support', desc: 'Approve members, help with issues via Manage Members.' },
+    { n: 4, label: 'Adjust', desc: 'Change visibility or archive via Community Status when needed.' },
+];
+
+function OverviewTab({ comm, status, onStatusChange, setActiveTab }) {
+    const [stats, setStats] = useState({ members: null, posts: null, discussions: null, reportsPending: null });
+    const [topContributors, setTopContributors] = useState([]);
+    const [loadingStats, setLoadingStats] = useState(true);
+
+    useEffect(() => {
+        let cancelled = false;
+        const load = async () => {
+            setLoadingStats(true);
+            try {
+                const [membersRes, postsRes, discussionsRes, reportsRes, postsForTopRes] = await Promise.all([
+                    supabase.from('community_members').select('*', { count: 'exact', head: true }).eq('community_id', comm.id),
+                    supabase.from('posts').select('*', { count: 'exact', head: true }).eq('community_id', comm.id),
+                    supabase.from('community_channels').select('*', { count: 'exact', head: true }).eq('community_id', comm.id),
+                    supabase.from('reports_moderation').select('*, posts!inner(community_id)', { count: 'exact', head: true }).eq('posts.community_id', comm.id).eq('status', 'Pending'),
+                    // Top Contributors — real grouping by posts.user_id in this community.
+                    supabase.from('posts').select('user_id').eq('community_id', comm.id),
+                ]);
+                if (cancelled) return;
+
+                setStats({
+                    members: membersRes.count ?? 0,
+                    posts: postsRes.count ?? 0,
+                    discussions: discussionsRes.count ?? 0,
+                    reportsPending: reportsRes.count ?? 0,
+                });
+
+                const counts = {};
+                (postsForTopRes.data || []).forEach(p => { counts[p.user_id] = (counts[p.user_id] || 0) + 1; });
+                const topIds = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+                if (topIds.length) {
+                    const { data: profiles } = await supabase.from('profiles').select('id, full_name, avatar_url').in('id', topIds.map(([id]) => id));
+                    if (cancelled) return;
+                    const profileById = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+                    setTopContributors(topIds.map(([id, count]) => ({ id, count, profile: profileById[id] || null })));
+                } else {
+                    setTopContributors([]);
+                }
+            } catch (err) {
+                console.error('Failed to load Overview stats:', err);
+            } finally {
+                if (!cancelled) setLoadingStats(false);
+            }
+        };
+        load();
+        return () => { cancelled = true; };
+    }, [comm.id]);
+
+    const cardStyle = { background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '1.25rem' };
+
     return (
-        <div style={{ display: 'grid', gap: '1.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
-            <div style={{ background: 'var(--bg-surface)', padding: '1.5rem', borderRadius: 16, border: '1px solid var(--border-color)' }}>
-                <h3 style={{ margin: '0 0 1rem', fontSize: '1.1rem', fontWeight: 800 }}>Community Info</h3>
-                <p><strong>Description:</strong> {comm.description || 'N/A'}</p>
-                <p><strong>Guidelines:</strong> {comm.guidelines || 'N/A'}</p>
-                <p><strong>Owner:</strong> {comm.owner_name}</p>
-                <p><strong>Created:</strong> {new Date(comm.created_at).toLocaleString('en-IN')}</p>
-                <p><strong>Paid:</strong> {comm.is_paid ? `Yes (₹${comm.price})` : 'No'}</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
+            {/* Main column */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: 0 }}>
+                {/* Stat cards — real only, 4 of them */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
+                    {STAT_CARDS.map(card => (
+                        <div key={card.key} style={cardStyle}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.6rem' }}>
+                                <span style={{ width: 32, height: 32, borderRadius: 8, background: `${card.color}18`, color: card.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem' }}>{card.icon}</span>
+                                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>{card.label}</span>
+                            </div>
+                            <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                                {loadingStats ? '—' : stats[card.key]}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Community Workflow — static, describes how to use this admin page */}
+                <div style={cardStyle}>
+                    <h3 style={{ margin: '0 0 1rem', fontSize: '1.05rem', fontWeight: 800 }}>Community Workflow</h3>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
+                        {WORKFLOW_STEPS.map(step => (
+                            <div key={step.n} style={{ flex: '1 1 200px', display: 'flex', gap: '0.75rem' }}>
+                                <span style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--bg-mint)', color: 'var(--peacock-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.8rem', flexShrink: 0 }}>{step.n}</span>
+                                <div>
+                                    <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>{step.label}</div>
+                                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{step.desc}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* What Each Tab Helps You Do — static */}
+                <div style={cardStyle}>
+                    <h3 style={{ margin: '0 0 1rem', fontSize: '1.05rem', fontWeight: 800 }}>What Each Tab Helps You Do</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem' }}>
+                        {TAB_HELP.map(t => (
+                            <div key={t.label} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '0.85rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                                    <span>{t.icon}</span>
+                                    <span style={{ fontWeight: 800, fontSize: '0.85rem' }}>{t.label}</span>
+                                </div>
+                                <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{t.desc}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Community Info — real, unchanged from before */}
+                <div style={cardStyle}>
+                    <h3 style={{ margin: '0 0 1rem', fontSize: '1.05rem', fontWeight: 800 }}>Community Info</h3>
+                    <p><strong>Description:</strong> {comm.description || 'N/A'}</p>
+                    <p><strong>Guidelines:</strong> {comm.guidelines || 'N/A'}</p>
+                    <p><strong>Owner:</strong> {comm.owner_name}</p>
+                    <p><strong>Created:</strong> {new Date(comm.created_at).toLocaleString('en-IN')}</p>
+                    <p><strong>Paid:</strong> {comm.is_paid ? `Yes (₹${comm.price})` : 'No'}</p>
+                </div>
+            </div>
+
+            {/* Sidebar */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                {/* Community Status */}
+                <div style={cardStyle}>
+                    <h3 style={{ margin: '0 0 0.75rem', fontSize: '0.95rem', fontWeight: 800 }}>Community Status</h3>
+                    <div style={{ marginBottom: '0.9rem' }}>
+                        <span style={{
+                            display: 'inline-block', padding: '0.25rem 0.7rem', borderRadius: 20, fontSize: '0.75rem', fontWeight: 800,
+                            background: status === 'Live' ? '#10B98118' : status === 'Archived' ? '#EF444418' : '#F59E0B18',
+                            color: status === 'Live' ? '#10B981' : status === 'Archived' ? '#EF4444' : '#F59E0B',
+                        }}>
+                            {status}
+                        </span>
+                    </div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Change Status</label>
+                    <select
+                        value={status}
+                        onChange={e => onStatusChange(e.target.value)}
+                        style={{ width: '100%', padding: '0.55rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
+                    >
+                        <option value="Live">Live</option>
+                        <option value="Coming Soon">Coming Soon</option>
+                        <option value="Hidden">Hidden</option>
+                        <option value="Archived">Archived</option>
+                    </select>
+                    {/* Same onQuickStatus call the list page's Archive action and this
+                        dropdown both use — no separate implementation. */}
+                </div>
+
+                {/* Quick Actions — only the two with a real existing destination */}
+                <div style={cardStyle}>
+                    <h3 style={{ margin: '0 0 0.9rem', fontSize: '0.95rem', fontWeight: 800 }}>Quick Actions</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                        <button onClick={() => setActiveTab('members')} style={{ padding: '0.6rem', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left' }}>
+                            👥 Manage Members
+                        </button>
+                        <button onClick={() => setActiveTab('reports')} style={{ padding: '0.6rem', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', textAlign: 'left' }}>
+                            🚩 View Reports
+                        </button>
+                    </div>
+                </div>
+
+                {/* Top Contributors — real, posts grouped by user_id */}
+                <div style={cardStyle}>
+                    <h3 style={{ margin: '0 0 0.9rem', fontSize: '0.95rem', fontWeight: 800 }}>Top Contributors</h3>
+                    {loadingStats ? (
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Loading...</p>
+                    ) : topContributors.length === 0 ? (
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No posts yet in this community.</p>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {topContributors.map(c => (
+                                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 800, overflow: 'hidden', flexShrink: 0 }}>
+                                        {c.profile?.avatar_url ? <img src={c.profile.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (c.profile?.full_name?.[0] || '?')}
+                                    </div>
+                                    <span style={{ flex: 1, fontSize: '0.82rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.profile?.full_name || 'Unknown'}</span>
+                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>{c.count} post{c.count === 1 ? '' : 's'}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Danger Zone */}
+                <div style={{ ...cardStyle, border: '1px solid #EF444430' }}>
+                    <h3 style={{ margin: '0 0 0.75rem', fontSize: '0.95rem', fontWeight: 800, color: '#EF4444' }}>Danger Zone</h3>
+                    <button
+                        onClick={() => onStatusChange('Archived')}
+                        disabled={status === 'Archived'}
+                        style={{ width: '100%', padding: '0.6rem', borderRadius: 8, background: '#EF444415', border: '1px solid #EF444430', color: '#EF4444', fontWeight: 700, fontSize: '0.85rem', cursor: status === 'Archived' ? 'not-allowed' : 'pointer', opacity: status === 'Archived' ? 0.6 : 1 }}
+                    >
+                        {status === 'Archived' ? 'Already Archived' : '🗄️ Archive Community'}
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -802,6 +1031,110 @@ function PostsTab({ comm, showToast }) {
                     <button onClick={() => togglePin(r.id, r.is_featured)} style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#3B82F615', color: '#3B82F6', border: '1px solid #3B82F630', cursor: 'pointer' }}>{r.is_featured ? 'Unpin' : 'Pin'}</button>
                     <button onClick={() => deletePost(r.id)} style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#EF444415', color: '#EF4444', border: '1px solid #EF444430', cursor: 'pointer' }}>Delete</button>
                 </div>
+            )}
+        />
+    );
+}
+
+// Delete-only, matching the existing real capability: community_channels
+// already has a real created_by column, and CommunityLanding.jsx's own
+// delete icon already calls the real delete_channel RPC, which (per its
+// existing code comment) enforces "caller is the channel's creator or an
+// admin" server-side. This tab reuses that same RPC — no new one needed.
+// Every viewer of this page is already a confirmed platform admin (gated
+// by AdminShell's own is_admin() check), so every row gets a Delete
+// action — no per-row creator/admin branching needed here, unlike the
+// community-facing UI where a regular member might view their own list.
+function ChannelsTab({ comm, showToast }) {
+    const [channels, setChannels] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [deletingId, setDeletingId] = useState(null);
+
+    const loadData = useCallback(async () => {
+        setLoading(true);
+        try {
+            const { data: chRows, error: chErr } = await supabase
+                .from('community_channels')
+                .select('id, name, description, created_by, created_at, conversation_id')
+                .eq('community_id', comm.id)
+                .order('created_at', { ascending: false });
+            if (chErr) throw chErr;
+
+            const creatorIds = [...new Set((chRows || []).map(c => c.created_by).filter(Boolean))];
+            const { data: profiles } = creatorIds.length
+                ? await supabase.from('profiles').select('id, full_name, username').in('id', creatorIds)
+                : { data: [] };
+            const profileById = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+
+            // Message counts — one batched query across all this community's channel
+            // conversation_ids, tallied client-side, instead of one query per row.
+            const convIds = (chRows || []).map(c => c.conversation_id).filter(Boolean);
+            const { data: msgRows } = convIds.length
+                ? await supabase.from('messages').select('conversation_id').in('conversation_id', convIds)
+                : { data: [] };
+            const msgCountByConv = {};
+            (msgRows || []).forEach(m => { msgCountByConv[m.conversation_id] = (msgCountByConv[m.conversation_id] || 0) + 1; });
+
+            setChannels((chRows || []).map(c => ({
+                ...c,
+                creator: c.created_by ? (profileById[c.created_by] || null) : null,
+                messageCount: c.conversation_id ? (msgCountByConv[c.conversation_id] || 0) : 0,
+            })));
+        } catch (err) {
+            showToast('Failed to load channels: ' + err.message, 'error');
+        } finally {
+            setLoading(false);
+        }
+    }, [comm.id, showToast]);
+
+    useEffect(() => { loadData(); }, [loadData]);
+
+    const deleteChannel = async (channel) => {
+        if (!window.confirm(`Delete #${channel.name}? This cannot be undone.`)) return;
+        setDeletingId(channel.id);
+        try {
+            const { data: ok, error } = await supabase.rpc('delete_channel', { p_channel_id: channel.id });
+            if (error) throw error;
+            // delete_channel returns a boolean rather than throwing on a denied delete.
+            // Re-verified against a channel matching the REAL pre-seeded shape (real
+            // conversation_id, created_by manually nulled after — not a channel with
+            // both fields null, which the RPC's early-return treats as "doesn't
+            // exist"): admins CAN delete created_by:null channels. A `false` return
+            // here means something else — most likely a stale row already removed
+            // elsewhere, or a channel missing its conversation_id entirely (which
+            // shouldn't happen for a real channel created through the normal flow).
+            // Still checking the return value, not just the absence of an error, so
+            // that case doesn't show a false "deleted" toast.
+            if (!ok) {
+                showToast('Delete was not permitted for this channel — it may already be removed, or is missing its linked conversation.', 'error');
+                return;
+            }
+            showToast('Channel deleted');
+            setChannels(prev => prev.filter(c => c.id !== channel.id)); // remove locally, no reload
+        } catch (err) {
+            showToast('Delete failed: ' + err.message, 'error');
+        } finally {
+            setDeletingId(null);
+        }
+    };
+
+    return (
+        <DataTable
+            columns={[
+                { key: 'name', label: 'Channel', render: v => '#' + v },
+                { key: 'creator', label: 'Created By', render: v => v ? (v.full_name || v.username) : '— (pre-seeded)' },
+                { key: 'messageCount', label: 'Messages' },
+                { key: 'created_at', label: 'Created', render: v => new Date(v).toLocaleDateString() },
+            ]}
+            rows={channels} loading={loading}
+            actions={(r) => (
+                <button
+                    onClick={() => deleteChannel(r)}
+                    disabled={deletingId === r.id}
+                    style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#EF444415', color: '#EF4444', border: '1px solid #EF444430', cursor: deletingId === r.id ? 'not-allowed' : 'pointer', opacity: deletingId === r.id ? 0.6 : 1 }}
+                >
+                    {deletingId === r.id ? 'Deleting...' : 'Delete'}
+                </button>
             )}
         />
     );

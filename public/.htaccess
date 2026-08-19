@@ -8,6 +8,11 @@ RewriteEngine On
 # If on Hostinger subdirectory, uncomment and set:
 # RewriteBase /
 
+# Serve a real prerendered static file for a route, if one exists
+# (e.g. /about-us -> about-us.html), before falling back to the SPA.
+RewriteCond %{REQUEST_FILENAME}.html -f
+RewriteRule ^([^.]+)$ $1.html [L]
+
 # Don't rewrite files or directories that exist
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d

@@ -39,7 +39,6 @@ export default function NotificationsTab({ user, showToast }) {
 
         setSaving(true);
         try {
-            console.log('DEBUG notification_preferences update payload:', { table: 'notification_preferences', update: changed, match: { user_id: user.id } });
             const { error } = await supabase
                 .from('notification_preferences')
                 .update(changed)
@@ -50,7 +49,7 @@ export default function NotificationsTab({ user, showToast }) {
             setPrefs(draft);
             showToast('Preferences saved', 'success');
         } catch (err) {
-            console.error('Failed to update notification preferences:', { message: err.message, code: err.code, details: err.details, hint: err.hint, full: err });
+            console.error('Failed to update notification preferences:', err);
             showToast(err.message || 'Failed to save preferences', 'error');
         } finally {
             setSaving(false);

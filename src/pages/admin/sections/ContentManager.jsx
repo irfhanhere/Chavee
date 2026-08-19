@@ -40,12 +40,23 @@ function StatCard({ title, count, color, icon, loading }) {
 }
 
 const TABS = [
+    { id: 'overview', label: 'Overview' },
     { id: 'all', label: 'All Content' },
     { id: 'blog', label: 'Blogs' },
     { id: 'press_release', label: 'Press Releases' },
     { id: 'announcement', label: 'Announcements' },
-    { id: 'homepage_banner', label: 'Homepage Banners' }
+    { id: 'homepage_banner', label: 'Homepage Banners' },
+    { id: 'faq', label: 'FAQ' },
+    { id: 'guideline_section', label: 'Community Guidelines' },
+    { id: 'perk', label: 'Student Perks' }
 ];
+
+// Real, published-feature-grounded category taxonomies for the two
+// structured editors below — matches the categories actually rendered
+// on the public /faq and /perks pages.
+const FAQ_CATEGORIES = ['General', 'Account', 'Jobs & Careers', 'Gigs', 'Communities', 'Events & Learning', 'Safety & Privacy'];
+const GUIDELINE_ICONS = ['respect', 'relevant', 'harassment', 'spam', 'privacy', 'transactions', 'ip', 'report', 'consequences'];
+const PERK_CATEGORIES = ['Learning', 'Career', 'Tools & Software', 'Entertainment', 'Health & Wellness', 'Finance'];
 
 export default function ContentManager() {
     const [rows, setRows] = useState([]);
@@ -130,13 +141,25 @@ export default function ContentManager() {
             if (type === 'press_release') {
                 metadata = { source: formData.source || '', external_link: formData.external_link || '' };
             } else if (type === 'announcement') {
-                metadata = { 
-                    pinned: !!formData.pinned, 
-                    expiry_date: formData.expiry_date || null, 
+                metadata = {
+                    pinned: !!formData.pinned,
+                    expiry_date: formData.expiry_date || null,
                     priority: Number(formData.priority) || 0,
                     button_text: formData.button_text || '',
                     button_link: formData.button_link || '',
                     color_theme: formData.color_theme || 'default'
+                };
+            } else if (type === 'faq') {
+                metadata = { popular: !!formData.popular };
+            } else if (type === 'guideline_section') {
+                metadata = { icon: formData.icon || 'respect', order: Number(formData.order) || 0 };
+            } else if (type === 'perk') {
+                metadata = {
+                    partner_name: formData.partner_name?.trim() || '',
+                    discount_label: formData.discount_label?.trim() || '',
+                    valid_till: formData.valid_till || null,
+                    perk_link: formData.perk_link?.trim() || '',
+                    brand_color: formData.brand_color?.trim() || ''
                 };
             }
 
@@ -161,7 +184,7 @@ export default function ContentManager() {
                 slug: formData.slug?.trim().toLowerCase().replace(/\s+/g, '-'),
                 summary: formData.summary?.trim(),
                 body: formData.body,
-                category: type === 'blog' ? formData.category?.trim() : null,
+                category: (type === 'blog' || type === 'faq' || type === 'perk') ? formData.category?.trim() : null,
                 author: formData.author?.trim(),
                 image_url: formData.image_url?.trim(),
                 status,
@@ -204,6 +227,8 @@ export default function ContentManager() {
             let published = submitType === 'publish';
             
             let metadata = {
+                subtitle: formData.subtitle?.trim() || '',
+                description: formData.description?.trim() || '',
                 banner_position: formData.banner_position || 'hero',
                 cta_text: formData.cta_text?.trim() || '',
                 cta_link: formData.cta_link?.trim() || '',
@@ -314,7 +339,7 @@ export default function ContentManager() {
                             <img src={row.metadata.desktop_image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         ) : (
                             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', background: '#3B82F615' }}>
-                                {row.content_type === 'blog' ? '📝' : row.content_type === 'press_release' ? '📰' : row.content_type === 'announcement' ? '📢' : '🖼'}
+                                {row.content_type === 'blog' ? '📝' : row.content_type === 'press_release' ? '📰' : row.content_type === 'announcement' ? '📢' : row.content_type === 'faq' ? '❓' : row.content_type === 'guideline_section' ? '🛡️' : row.content_type === 'perk' ? '🎁' : '🖼'}
                             </div>
                         )}
                     </div>
@@ -375,6 +400,9 @@ export default function ContentManager() {
                             <button onClick={() => openRichModal('press_release')} style={{ padding: '0.5rem 0.75rem', borderRadius: 8, background: '#3B82F6', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>+ Press</button>
                             <button onClick={() => openRichModal('announcement')} style={{ padding: '0.5rem 0.75rem', borderRadius: 8, background: '#F59E0B', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>+ Announce</button>
                             <button onClick={() => openBannerModal()} style={{ padding: '0.5rem 0.75rem', borderRadius: 8, background: '#8B5CF6', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>+ Banner</button>
+                            <button onClick={() => openRichModal('faq')} style={{ padding: '0.5rem 0.75rem', borderRadius: 8, background: '#0EA5E9', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>+ FAQ</button>
+                            <button onClick={() => openRichModal('guideline_section')} style={{ padding: '0.5rem 0.75rem', borderRadius: 8, background: '#14B8A6', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>+ Guideline</button>
+                            <button onClick={() => openRichModal('perk')} style={{ padding: '0.5rem 0.75rem', borderRadius: 8, background: '#EC4899', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>+ Perk</button>
                         </div>
                     </div>
                 </div>
@@ -411,68 +439,74 @@ export default function ContentManager() {
                 ))}
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-                <input 
-                    type="text" 
-                    placeholder="Search titles..." 
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                    style={{ flex: 1, minWidth: 200, padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid var(--border-color)', outline: 'none', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
-                />
-                <select 
-                    value={statusFilter} 
-                    onChange={e => setStatusFilter(e.target.value)}
-                    style={{ padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid var(--border-color)', outline: 'none', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
-                >
-                    <option value="all">All Statuses</option>
-                    <option value="published">Published</option>
-                    <option value="draft">Drafts</option>
-                    <option value="scheduled">Scheduled</option>
-                    <option value="archived">Archived</option>
-                </select>
-            </div>
+            {activeTab === 'overview' ? (
+                <ContentOverview rows={rows} loading={loading} />
+            ) : (
+                <>
+                    <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+                        <input
+                            type="text"
+                            placeholder="Search titles..."
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            style={{ flex: 1, minWidth: 200, padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid var(--border-color)', outline: 'none', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+                        />
+                        <select
+                            value={statusFilter}
+                            onChange={e => setStatusFilter(e.target.value)}
+                            style={{ padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid var(--border-color)', outline: 'none', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+                        >
+                            <option value="all">All Statuses</option>
+                            <option value="published">Published</option>
+                            <option value="draft">Drafts</option>
+                            <option value="scheduled">Scheduled</option>
+                            <option value="archived">Archived</option>
+                        </select>
+                    </div>
 
-            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 14, overflow: 'hidden', padding: '1.25rem', boxShadow: 'var(--shadow-sm)' }}>
-                <DataTable
-                    columns={columns}
-                    rows={filteredRows}
-                    loading={loading}
-                    emptyMessage="No content found."
-                    actions={(row) => (
-                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                            <button 
-                                onClick={() => row.content_type === 'homepage_banner' ? openBannerModal(row) : openRichModal(row.content_type, row)} 
-                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#3B82F615', color: '#3B82F6', border: '1px solid #3B82F630', cursor: 'pointer' }}
-                            >
-                                Edit
-                            </button>
-                            
-                            <button 
-                                onClick={() => handleDuplicate(row)} 
-                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#8B5CF615', color: '#8B5CF6', border: '1px solid #8B5CF630', cursor: 'pointer' }}
-                            >
-                                Duplicate
-                            </button>
+                    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 14, overflow: 'hidden', padding: '1.25rem', boxShadow: 'var(--shadow-sm)' }}>
+                        <DataTable
+                            columns={columns}
+                            rows={filteredRows}
+                            loading={loading}
+                            emptyMessage="No content found."
+                            actions={(row) => (
+                                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                    <button
+                                        onClick={() => row.content_type === 'homepage_banner' ? openBannerModal(row) : openRichModal(row.content_type, row)}
+                                        style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#3B82F615', color: '#3B82F6', border: '1px solid #3B82F630', cursor: 'pointer' }}
+                                    >
+                                        Edit
+                                    </button>
 
-                            {row.status !== 'archived' ? (
-                                <button 
-                                    onClick={() => handleArchive(row.id)} 
-                                    style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#F59E0B15', color: '#F59E0B', border: '1px solid #F59E0B30', cursor: 'pointer' }}
-                                >
-                                    Archive
-                                </button>
-                            ) : (
-                                <button 
-                                    onClick={() => setConfirmDelete({ open: true, row })} 
-                                    style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#EF444415', color: '#EF4444', border: '1px solid #EF444430', cursor: 'pointer' }}
-                                >
-                                    Delete Permanently
-                                </button>
+                                    <button
+                                        onClick={() => handleDuplicate(row)}
+                                        style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#8B5CF615', color: '#8B5CF6', border: '1px solid #8B5CF630', cursor: 'pointer' }}
+                                    >
+                                        Duplicate
+                                    </button>
+
+                                    {row.status !== 'archived' ? (
+                                        <button
+                                            onClick={() => handleArchive(row.id)}
+                                            style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#F59E0B15', color: '#F59E0B', border: '1px solid #F59E0B30', cursor: 'pointer' }}
+                                        >
+                                            Archive
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={() => setConfirmDelete({ open: true, row })}
+                                            style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: 6, background: '#EF444415', color: '#EF4444', border: '1px solid #EF444430', cursor: 'pointer' }}
+                                        >
+                                            Delete Permanently
+                                        </button>
+                                    )}
+                                </div>
                             )}
-                        </div>
-                    )}
-                />
-            </div>
+                        />
+                    </div>
+                </>
+            )}
 
             {/* Rich Content Modal (Custom instead of FormModal to handle multiple submit buttons and custom rendering) */}
             {richModal.open && (
@@ -537,6 +571,17 @@ function RichContentModal({ mode, type, initialValues, onClose, onSave, saving }
         button_text: initialValues.metadata?.button_text || '',
         button_link: initialValues.metadata?.button_link || '',
         color_theme: initialValues.metadata?.color_theme || 'default',
+        // FAQ
+        popular: initialValues.metadata?.popular || false,
+        // Community Guidelines section
+        icon: initialValues.metadata?.icon || 'respect',
+        order: initialValues.metadata?.order ?? 0,
+        // Student Perk
+        partner_name: initialValues.metadata?.partner_name || '',
+        discount_label: initialValues.metadata?.discount_label || '',
+        valid_till: initialValues.metadata?.valid_till ? new Date(initialValues.metadata.valid_till).toISOString().slice(0, 10) : '',
+        perk_link: initialValues.metadata?.perk_link || '',
+        brand_color: initialValues.metadata?.brand_color || '',
     });
 
     const update = (key, val) => setFormData(prev => ({ ...prev, [key]: val }));
@@ -563,7 +608,9 @@ function RichContentModal({ mode, type, initialValues, onClose, onSave, saving }
                     {/* Basic Info */}
                     <div style={{ display: 'flex', gap: '1rem' }}>
                         <div style={{ flex: 1 }}>
-                            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Title *</label>
+                            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>
+                                {type === 'faq' ? 'Question *' : type === 'guideline_section' ? 'Section Title *' : type === 'perk' ? 'Perk Title *' : 'Title *'}
+                            </label>
                             <input value={formData.title} onChange={handleTitleChange} style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)' }} />
                         </div>
                         <div style={{ flex: 1 }}>
@@ -585,18 +632,95 @@ function RichContentModal({ mode, type, initialValues, onClose, onSave, saving }
                         </div>
                     )}
 
+                    {type === 'faq' && (
+                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
+                            <div style={{ flex: 1 }}>
+                                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Category *</label>
+                                <select value={formData.category} onChange={e => update('category', e.target.value)} style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
+                                    <option value="">Select category...</option>
+                                    {FAQ_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                            </div>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 700, paddingBottom: '0.6rem', cursor: 'pointer' }}>
+                                <input type="checkbox" checked={formData.popular} onChange={e => update('popular', e.target.checked)} />
+                                Show in "Popular Questions"
+                            </label>
+                        </div>
+                    )}
+
+                    {type === 'perk' && (
+                        <div style={{ display: 'flex', gap: '1rem' }}>
+                            <div style={{ flex: 1 }}>
+                                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Category *</label>
+                                <select value={formData.category} onChange={e => update('category', e.target.value)} style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
+                                    <option value="">Select category...</option>
+                                    {PERK_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Partner Name *</label>
+                                <input value={formData.partner_name} onChange={e => update('partner_name', e.target.value)} placeholder="e.g. Unacademy" style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)' }} />
+                            </div>
+                        </div>
+                    )}
+
+                    {type === 'guideline_section' && (
+                        <div style={{ display: 'flex', gap: '1rem' }}>
+                            <div style={{ flex: 1 }}>
+                                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Icon</label>
+                                <select value={formData.icon} onChange={e => update('icon', e.target.value)} style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
+                                    {GUIDELINE_ICONS.map(i => <option key={i} value={i}>{i}</option>)}
+                                </select>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Display Order</label>
+                                <input type="number" value={formData.order} onChange={e => update('order', e.target.value)} style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)' }} />
+                            </div>
+                        </div>
+                    )}
+
                     <div>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Summary / Excerpt</label>
+                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>
+                            {type === 'guideline_section' ? 'Short Summary (shown collapsed)' : type === 'perk' ? 'Description (shown on card)' : 'Summary / Excerpt'}
+                        </label>
                         <textarea value={formData.summary} onChange={e => update('summary', e.target.value)} style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)', minHeight: 60, resize: 'vertical' }} />
                     </div>
 
                     <div>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Image URL</label>
+                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>
+                            {type === 'perk' ? 'Logo Image URL' : 'Image URL'}
+                        </label>
                         <input value={formData.image_url} onChange={e => update('image_url', e.target.value)} placeholder="https://... (or upload to storage)" style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)' }} />
                     </div>
 
+                    {type === 'perk' && (
+                        <div style={{ padding: '1rem', background: 'rgba(16, 185, 129, 0.05)', borderRadius: 8, border: '1px dashed #10B98150' }}>
+                            <h4 style={{ margin: '0 0 0.5rem', color: '#10B981', fontSize: '0.9rem' }}>Perk Details</h4>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Discount Label (e.g. "20% OFF")</label>
+                                    <input value={formData.discount_label} onChange={e => update('discount_label', e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Valid Till</label>
+                                    <input type="date" value={formData.valid_till} onChange={e => update('valid_till', e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Perk Link (redeem URL)</label>
+                                    <input value={formData.perk_link} onChange={e => update('perk_link', e.target.value)} placeholder="https://..." style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Brand Color (card header, e.g. #1DB954)</label>
+                                    <input value={formData.brand_color} onChange={e => update('brand_color', e.target.value)} placeholder="#115E59" style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)' }} />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <div>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Body Content (HTML/Markdown supported) *</label>
+                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>
+                            {type === 'faq' ? 'Answer *' : type === 'guideline_section' ? 'Full Description *' : 'Body Content (HTML/Markdown supported) *'}
+                        </label>
                         <textarea value={formData.body} onChange={e => update('body', e.target.value)} style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)', minHeight: 200, resize: 'vertical', fontFamily: 'monospace' }} />
                     </div>
 
@@ -688,6 +812,8 @@ function RichContentModal({ mode, type, initialValues, onClose, onSave, saving }
 function BannerModal({ mode, initialValues, onClose, onSave, saving }) {
     const [formData, setFormData] = useState({
         title: initialValues.title || '',
+        subtitle: initialValues.metadata?.subtitle || '',
+        description: initialValues.metadata?.description || '',
         banner_position: initialValues.metadata?.banner_position || 'hero',
         cta_text: initialValues.metadata?.cta_text || '',
         cta_link: initialValues.metadata?.cta_link || '',
@@ -726,6 +852,19 @@ function BannerModal({ mode, initialValues, onClose, onSave, saving }) {
                                 <option value="promo">Promo Strip</option>
                             </select>
                         </div>
+                    </div>
+
+                    {/* Real gap found vs. the reference (adminpane-announcement-banner.png):
+                        banners had no public-facing subtitle/description copy at all,
+                        only a CTA. Added here — stored in the same metadata jsonb,
+                        no migration needed. */}
+                    <div>
+                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Subtitle (public)</label>
+                        <input value={formData.subtitle} onChange={e => update('subtitle', e.target.value)} placeholder="Shown under the banner title" style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)' }} />
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.25rem' }}>Description (public, optional)</label>
+                        <textarea value={formData.description} onChange={e => update('description', e.target.value)} rows={2} style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid var(--border-color)', resize: 'vertical', fontFamily: 'inherit' }} />
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -788,6 +927,184 @@ function BannerModal({ mode, initialValues, onClose, onSave, saving }) {
                     
                     <button onClick={() => onSave(formData, 'publish')} disabled={saving} style={{ padding: '0.6rem 1.2rem', borderRadius: 8, background: 'var(--peacock-green)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Publish Banner</button>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+// ── CONTENT OVERVIEW TAB — real counts from `rows` (the same data every
+// other tab already loads from `content`), no fabricated numbers or
+// trend deltas (no time-series data exists to back those honestly). ──
+const TYPE_META = {
+    blog: { label: 'Blogs', color: '#10B981' },
+    press_release: { label: 'Press Releases', color: '#3B82F6' },
+    announcement: { label: 'Announcements', color: '#F59E0B' },
+    homepage_banner: { label: 'Homepage Banners', color: '#8B5CF6' },
+    faq: { label: 'FAQ', color: '#0EA5E9' },
+    guideline_section: { label: 'Community Guidelines', color: '#14B8A6' },
+    perk: { label: 'Student Perks', color: '#EC4899' },
+};
+const STATUS_META = {
+    published: { label: 'Published', color: '#10B981' },
+    draft: { label: 'Draft', color: '#F59E0B' },
+    scheduled: { label: 'Scheduled', color: '#3B82F6' },
+    archived: { label: 'Archived', color: '#6B7280' },
+};
+
+function relativeTime(dateStr) {
+    if (!dateStr) return '—';
+    const diffMs = Date.now() - new Date(dateStr).getTime();
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (days <= 0) return 'Today';
+    if (days === 1) return '1 day ago';
+    if (days < 7) return `${days} days ago`;
+    const weeks = Math.floor(days / 7);
+    if (weeks < 5) return `${weeks} week${weeks > 1 ? 's' : ''} ago`;
+    return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function ContentOverview({ rows, loading }) {
+    const byType = useMemo(() => {
+        const counts = {};
+        rows.forEach(r => { counts[r.content_type] = (counts[r.content_type] || 0) + 1; });
+        return counts;
+    }, [rows]);
+
+    const total = rows.length;
+
+    // Real conic-gradient donut — no charting library needed, no invented
+    // percentages: every slice is `count / total` from the real rows.
+    const donutSlices = useMemo(() => {
+        let acc = 0;
+        return Object.entries(byType)
+            .filter(([, count]) => count > 0)
+            .sort((a, b) => b[1] - a[1])
+            .map(([type, count]) => {
+                const pct = total > 0 ? (count / total) * 100 : 0;
+                const start = acc;
+                acc += pct;
+                return { type, count, pct, start, end: acc, meta: TYPE_META[type] || { label: type, color: '#94A3B8' } };
+            });
+    }, [byType, total]);
+
+    const gradientStops = donutSlices.map(s => `${s.meta.color} ${s.start}% ${s.end}%`).join(', ');
+
+    const byStatus = useMemo(() => {
+        const table = {};
+        Object.keys(STATUS_META).forEach(status => {
+            table[status] = { total: 0 };
+            Object.keys(TYPE_META).forEach(type => { table[status][type] = 0; });
+        });
+        rows.forEach(r => {
+            if (!table[r.status]) table[r.status] = { total: 0 };
+            table[r.status][r.content_type] = (table[r.status][r.content_type] || 0) + 1;
+            table[r.status].total += 1;
+        });
+        return table;
+    }, [rows]);
+
+    const recent = useMemo(() => {
+        return [...rows]
+            .filter(r => r.status === 'published')
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+            .slice(0, 5);
+    }, [rows]);
+
+    if (loading) {
+        return <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>Loading overview...</div>;
+    }
+
+    if (total === 0) {
+        return (
+            <div style={{ background: 'var(--bg-surface)', border: '1px dashed var(--border-color)', borderRadius: 14, padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                No content exists yet — create a Blog, Press Release, Announcement, Banner, FAQ, Guideline or Perk to see real numbers here.
+            </div>
+        );
+    }
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', alignItems: 'start' }}>
+                {/* Donut */}
+                <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '1.5rem', boxShadow: 'var(--shadow-sm)' }}>
+                    <h3 style={{ margin: '0 0 0.25rem', fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)' }}>Content Overview</h3>
+                    <p style={{ margin: '0 0 1.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Real breakdown of all {total} content items by type.</p>
+                    <div style={{ display: 'flex', gap: '2rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{
+                            width: 160, height: 160, borderRadius: '50%', flexShrink: 0,
+                            background: donutSlices.length > 0 ? `conic-gradient(${gradientStops})` : 'var(--bg-elevated)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                            <div style={{ width: 100, height: 100, borderRadius: '50%', background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                <span style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--text-primary)' }}>{total}</span>
+                                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Total</span>
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: 160 }}>
+                            {donutSlices.map(s => (
+                                <div key={s.type} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: s.meta.color, flexShrink: 0 }} />
+                                    <span style={{ color: 'var(--text-secondary)', flex: 1 }}>{s.meta.label}</span>
+                                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{s.count} ({s.pct.toFixed(1)}%)</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Recent Content */}
+                <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '1.5rem', boxShadow: 'var(--shadow-sm)' }}>
+                    <h3 style={{ margin: '0 0 0.25rem', fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)' }}>Recent Content</h3>
+                    <p style={{ margin: '0 0 1.25rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Latest published items.</p>
+                    {recent.length === 0 ? (
+                        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Nothing published yet.</p>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                            {recent.map(r => (
+                                <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+                                    <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
+                                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{relativeTime(r.created_at)}</div>
+                                    </div>
+                                    <span style={{ fontSize: '0.68rem', fontWeight: 800, color: (TYPE_META[r.content_type] || {}).color || '#94A3B8', background: `${(TYPE_META[r.content_type] || {}).color || '#94A3B8'}15`, padding: '0.2rem 0.55rem', borderRadius: 20, whiteSpace: 'nowrap' }}>
+                                        {(TYPE_META[r.content_type] || {}).label || r.content_type}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Content by Status table */}
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '1.5rem', boxShadow: 'var(--shadow-sm)', overflowX: 'auto' }}>
+                <h3 style={{ margin: '0 0 0.25rem', fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)' }}>Content by Status</h3>
+                <p style={{ margin: '0 0 1.25rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Real distribution of content across statuses.</p>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', minWidth: 560 }}>
+                    <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                            <th style={{ textAlign: 'left', padding: '0.6rem 0.5rem', color: 'var(--text-muted)', fontWeight: 700 }}>Status</th>
+                            {Object.entries(TYPE_META).map(([type, meta]) => (
+                                <th key={type} style={{ textAlign: 'center', padding: '0.6rem 0.5rem', color: 'var(--text-muted)', fontWeight: 700 }}>{meta.label}</th>
+                            ))}
+                            <th style={{ textAlign: 'center', padding: '0.6rem 0.5rem', color: 'var(--text-primary)', fontWeight: 800 }}>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {Object.entries(STATUS_META).map(([status, meta]) => (
+                            <tr key={status} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={{ padding: '0.6rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: meta.color }} />
+                                    {meta.label}
+                                </td>
+                                {Object.keys(TYPE_META).map(type => (
+                                    <td key={type} style={{ textAlign: 'center', padding: '0.6rem 0.5rem', color: 'var(--text-secondary)' }}>{byStatus[status]?.[type] || 0}</td>
+                                ))}
+                                <td style={{ textAlign: 'center', padding: '0.6rem 0.5rem', fontWeight: 800, color: 'var(--text-primary)' }}>{byStatus[status]?.total || 0}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
         </div>
     );

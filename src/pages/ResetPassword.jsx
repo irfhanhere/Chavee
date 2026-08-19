@@ -5,6 +5,7 @@ import { ChaveeLogo } from '../Logo.jsx';
 import { ButtonSpinner } from '../components/Spinner.jsx';
 import Toast, { useToast } from '../components/Toast.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
+import SEO from '../components/SEO.jsx';
 
 import { AuthLayout } from '../components/auth/AuthLayout.jsx';
 import { BrandPanel } from '../components/auth/BrandPanel.jsx';
@@ -98,21 +99,41 @@ export default function ResetPassword() {
         );
     }
 
+    // Same bug as ForgotPassword.jsx: BrandPanel unconditionally renders
+    // <FeatureList features={features} /> — this page called it with no
+    // features prop, which crashed the whole route (real blank white page).
+    const resetPasswordFeatures = [
+        { heading: "Strong by default", description: "We check your new password meets real security requirements.", icon: "🔒" },
+        { heading: "Instant access", description: "Signed back in the moment you confirm.", icon: "⚡" },
+        { heading: "One-time link", description: "This reset link only works once, for your safety.", icon: "🛡️" },
+    ];
+
     return (
-        <AuthLayout 
+        <>
+        <SEO
+            title="Reset Password | Chavee"
+            description="Set a new password for your Chavee account."
+            path="/reset-password"
+        />
+        <AuthLayout
             leftPanel={
-                <BrandPanel 
+                <BrandPanel
                     heading={<>Set a new<br/>password.</>}
                     subtitle="Create a strong password to keep your Chavee account secure."
+                    features={resetPasswordFeatures}
                 />
             }
             mobileHeader={
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
                     <ChaveeLogo height={32} light />
                     <div>
-                        <h1 style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '0.25rem', lineHeight: 1.1, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
+                        {/* Not a real <h1> — BrandPanel's heading is already the page's
+                            one real h1 (desktop panel), and both exist in the DOM
+                            simultaneously (CSS-toggled by breakpoint, not conditionally
+                            rendered), so a second h1 here would be a real duplicate-h1 bug. */}
+                        <p style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '0.25rem', lineHeight: 1.1, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
                             New Password
-                        </h1>
+                        </p>
                         <p style={{ fontSize: '1rem', opacity: 0.9, color: '#DFF7EA', margin: 0 }}>
                             Secure your account.
                         </p>
@@ -182,5 +203,6 @@ export default function ResetPassword() {
 
             <Toast {...toast} onHide={hideToast} />
         </AuthLayout>
+        </>
     );
 }

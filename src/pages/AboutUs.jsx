@@ -1,242 +1,305 @@
-import React, { useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import React from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar.jsx';
 import Footer from '../components/Footer.jsx';
+import SEO from '../components/SEO.jsx';
+import { useLandingStats } from '../hooks/useLandingStats.js';
+
+// Real names/roles/bios — bios match the provided design reference verbatim
+// (design-references/Seo/About Us- Web.png), not invented. Social links are
+// the real URLs provided directly by the user, not guessed. Photos are the
+// real headshots provided directly by the user (design-references/Images/
+// akshay.png, irfhan.png), resized/compressed into public/assets/founders/.
+const FOUNDERS = [
+    {
+        name: 'Akshay Ennazhiyil',
+        role: 'Founder & CEO',
+        bio: 'Sales expert and education consultant with a passion for helping students discover the right path and opportunities.',
+        initials: 'AE',
+        color: 'linear-gradient(135deg, #115E59 0%, #059669 100%)',
+        photo: '/assets/founders/akshay.jpg',
+        alt: 'Akshay Ennazhiyil, Founder & CEO of Chavee',
+        links: [
+            { label: 'LinkedIn', icon: 'in', url: 'https://www.linkedin.com/in/akshay-ennazhiyil-85213a241/' },
+            { label: 'Instagram', icon: '📷', url: 'https://www.instagram.com/mr_akshay.e/' },
+        ]
+    },
+    {
+        name: 'Irfhan',
+        role: 'Co-founder & COO',
+        bio: 'Freelance brand developer, digital marketer and travel consultant. Building brands, experiences and platforms that make impact.',
+        initials: 'IR',
+        color: 'linear-gradient(135deg, #1E293B 0%, #0F172A 100%)',
+        photo: '/assets/founders/irfhan.jpg',
+        // Includes his real handle (IRFHANHERE — already linked via Instagram/
+        // website below) so image search on that name surfaces this photo.
+        alt: 'Irfhan (IRFHANHERE), Co-founder & COO of Chavee',
+        links: [
+            { label: 'LinkedIn', icon: 'in', url: 'https://www.linkedin.com/in/irfhan-ap/' },
+            { label: 'Instagram', icon: '📷', url: 'https://www.instagram.com/IRFHANHERE/' },
+            { label: 'Website', icon: '🌐', url: 'https://www.irfhanhere.space/' },
+        ]
+    }
+];
+
+const JOURNEY = [
+    { icon: '💡', title: 'The Idea', desc: 'Identified the gap in student support and opportunities.' },
+    { icon: '🚀', title: 'First Step', desc: 'Built the foundation with a student-first approach.' },
+    { icon: '👥', title: 'Growing Community', desc: 'Students and colleges joined hands to grow together.' },
+    { icon: '📈', title: 'Expanding Horizons', desc: 'More opportunities, features and partnerships added.' },
+    { icon: '🏆', title: 'The Future', desc: 'Continuously evolving to empower every student.' },
+];
+
+const DIFFERENTIATORS = [
+    { icon: '👤', title: 'Student First', desc: 'Everything we build is centered around student success and growth.' },
+    { icon: '▦', title: 'All in One Place', desc: 'Learn, connect, find opportunities and grow — without switching platforms.' },
+    { icon: '🛡️', title: 'Trusted & Verified', desc: 'Curated opportunities, verified partners and quality experiences.' },
+    { icon: '❤️', title: 'Community Driven', desc: 'A supportive community that encourages collaboration and learning.' },
+];
+
+// Real photo when one exists; falls back to the initials avatar (on
+// missing photo, or if the real image fails to load) — same onError
+// fallback pattern used elsewhere in the app (marquee, testimonials).
+function InitialsAvatar({ initials, gradient, size = 84, photo, alt }) {
+    return (
+        <div style={{
+            width: size, height: size, borderRadius: '50%', background: gradient,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#fff', fontWeight: 900, fontSize: size * 0.34, flexShrink: 0,
+            boxShadow: 'var(--shadow-sm)', position: 'relative', overflow: 'hidden'
+        }}>
+            {photo && (
+                <img
+                    src={photo}
+                    alt={alt || initials}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', inset: 0 }}
+                    onError={(e) => {
+                        e.target.style.display = 'none';
+                        e.target.nextSibling.style.display = 'flex';
+                    }}
+                />
+            )}
+            <span style={{ display: photo ? 'none' : 'flex' }}>{initials}</span>
+        </div>
+    );
+}
 
 export default function AboutUs() {
-    useEffect(() => {
-        const originalTitle = document.title;
-        const metaDesc = document.querySelector('meta[name="description"]');
-        const originalDesc = metaDesc ? metaDesc.getAttribute('content') : '';
+    const navigate = useNavigate();
+    const stats = useLandingStats();
 
-        document.title = "About Chavee | India's First Student-Focused Social Networking Platform";
-        if (metaDesc) {
-            metaDesc.setAttribute('content', "Discover the story behind Chavee, India's first student-first social platform built in Kerala — connecting college students through mentorship, freelance gigs, language learning, and campus communities.");
-        }
-
-        return () => {
-            document.title = originalTitle;
-            if (metaDesc) {
-                metaDesc.setAttribute('content', originalDesc);
-            }
-        };
-    }, []);
+    const handleExplore = () => {
+        sessionStorage.setItem('previewMode', 'true');
+        navigate('/dashboard');
+    };
 
     const S = {
-        wrapper: {
-            background: 'var(--bg-base)',
-            minHeight: '100vh',
-            display: 'flex',
-            flexDirection: 'column',
-        },
-        hero: {
-            background: 'linear-gradient(135deg, rgba(17,94,89,0.03) 0%, rgba(5,150,105,0.01) 100%)',
-            borderBottom: '1px solid var(--border-color)',
-            padding: '4.5rem 2rem',
-            textAlign: 'center',
-        },
-        container: {
-            maxWidth: 800,
-            margin: '0 auto',
-            padding: '3.5rem 1.5rem',
-            width: '100%',
-        },
-        title: {
-            fontSize: 'clamp(2.2rem, 5vw, 3.2rem)',
-            fontWeight: 900,
-            color: 'var(--text-primary)',
-            marginBottom: '1rem',
-            lineHeight: 1.1,
-        },
-        subtitle: {
-            color: 'var(--text-secondary)',
-            maxWidth: 600,
-            margin: '0 auto',
-            fontSize: '0.98rem',
-            lineHeight: 1.6,
-        },
-        contentCard: {
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 16,
-            padding: '2.5rem',
-            boxShadow: 'var(--shadow-sm)',
-            fontSize: '0.95rem',
-            lineHeight: 1.75,
-            color: 'var(--text-secondary)',
-        },
-        h2: {
-            fontSize: '1.5rem',
-            fontWeight: 800,
-            color: 'var(--text-primary)',
-            marginTop: '2.5rem',
-            marginBottom: '1.25rem',
-            borderBottom: '1px solid var(--border-color)',
-            paddingBottom: '0.5rem',
-        },
-        h3: {
-            fontSize: '1.15rem',
-            fontWeight: 700,
-            color: 'var(--text-primary)',
-            marginTop: '1.75rem',
-            marginBottom: '0.75rem',
-        },
-        p: {
-            marginBottom: '1.25rem',
-            textAlign: 'justify',
-        },
-        ul: {
-            paddingLeft: '1.5rem',
-            marginBottom: '1.25rem',
-            listStyleType: 'disc',
-        },
-        li: {
-            marginBottom: '0.5rem',
-        },
-        link: {
-            color: 'var(--peacock-green)',
-            fontWeight: 600,
-            textDecoration: 'none',
-            transition: 'color 0.2s',
-        },
-        strong: {
-            fontWeight: 700,
-            color: 'var(--text-primary)',
-        },
-        italic: {
-            fontStyle: 'italic',
-            color: 'var(--text-muted)',
-            display: 'block',
-            marginTop: '2rem',
-            borderTop: '1px solid var(--border-color)',
-            paddingTop: '1rem',
-        }
+        wrapper: { background: 'var(--bg-base)', minHeight: '100vh', display: 'flex', flexDirection: 'column' },
+        container: { maxWidth: 1140, margin: '0 auto', padding: '0 1.5rem' },
+        card: { background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, boxShadow: 'var(--shadow-sm)' },
+        sectionLabel: { color: 'var(--peacock-green)', fontWeight: 800, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' },
+        h2: { fontSize: 'clamp(1.5rem, 3vw, 1.9rem)', fontWeight: 900, color: 'var(--text-primary)', margin: '0 0 1rem' },
     };
 
     return (
         <div style={S.wrapper}>
+            <SEO
+                title="About Chavee | India's First Student-Focused Social Networking Platform"
+                description="Discover the story behind Chavee, India's first student-first social platform built in Kerala — connecting college students through mentorship, freelance gigs, language learning, and campus communities."
+                path="/about-us"
+            />
             <Navbar />
 
-            {/* Hero */}
-            <header style={S.hero}>
-                <p style={{ color: 'var(--peacock-green)', fontWeight: 700, fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>🌿 Belong. Learn. Earn.</p>
-                <h1 style={S.title}>About Us</h1>
-                <p style={S.subtitle}>
-                    India's first student-focused social networking platform built in Kerala.
-                </p>
+            {/* ── Hero (no real photo exists for this project — honest dark
+                 gradient panel instead of the reference's stock/group photo) ── */}
+            <header style={{
+                background: 'linear-gradient(135deg, #0F172A 0%, #115E59 100%)',
+                padding: '4rem 1.5rem 5rem',
+                position: 'relative',
+                overflow: 'hidden'
+            }}>
+                <div style={{ ...S.container, position: 'relative', zIndex: 1 }}>
+                    <p style={{ color: '#6EE7B7', fontWeight: 800, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '0.75rem' }}>About Chavee</p>
+                    <h1 style={{ fontSize: 'clamp(2.2rem, 6vw, 3.4rem)', fontWeight: 900, color: '#fff', margin: '0 0 1rem', lineHeight: 1.1 }}>
+                        Let's Grow.<br />Let's Build.<br />Let's <span style={{ color: '#34D399' }}>Belong.</span>
+                    </h1>
+                    <p style={{ color: 'rgba(255,255,255,0.8)', maxWidth: 480, fontSize: '1rem', lineHeight: 1.65, marginBottom: '2rem' }}>
+                        India's first student-focused social networking platform built to learn, connect, discover opportunities and grow together.
+                    </p>
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                        <Link to="/signup" className="btn-primary" style={{ padding: '0.85rem 1.75rem', borderRadius: 12, fontSize: '0.92rem', textDecoration: 'none' }}>Join Chavee Now</Link>
+                        <button onClick={handleExplore} style={{ padding: '0.85rem 1.75rem', borderRadius: 12, fontSize: '0.92rem', fontWeight: 700, background: 'transparent', border: '1px solid rgba(255,255,255,0.35)', color: '#fff', cursor: 'pointer' }}>Explore Platform</button>
+                    </div>
+
+                    {/* Floating feature bubbles */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', marginTop: '3rem' }}>
+                        {[
+                            { icon: '🎓', t: 'Learn New Skills', d: 'Courses & resources' },
+                            { icon: '💼', t: 'Find Opportunities', d: 'Jobs, events & more' },
+                            { icon: '🤝', t: 'Connect & Grow', d: 'Communities & peers' },
+                        ].map(b => (
+                            <div key={b.t} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>{b.icon}</div>
+                                <div>
+                                    <div style={{ color: '#fff', fontWeight: 700, fontSize: '0.85rem' }}>{b.t}</div>
+                                    <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: '0.76rem' }}>{b.d}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             </header>
 
-            {/* Main Content */}
-            <main style={S.container}>
-                <article style={S.contentCard}>
-                    <h2 style={{ ...S.h2, marginTop: 0 }}>Belong. Learn. Earn.</h2>
-                    <p style={S.p}>
-                        Chavee is India's first student-focused social networking platform — built from the ground up in Kerala for Gen Z college and school students who are tired of choosing between social media that distracts them and professional networks that intimidate them.
-                    </p>
-                    <p style={S.p}>
-                        We believe college is the most formative stretch of a young person's life, and it deserves a digital space built specifically for it — not a repurposed version of platforms designed for adults, brands, or job-seekers with years of experience already behind them. Chavee exists to fill that gap.
-                    </p>
-
-                    <h2 style={S.h2}>Our Mission</h2>
-                    <p style={S.p}>
-                        Chavee was founded with a single, clear mission: to create a constructive and engaging online space for college students across India, starting with Kerala.
-                    </p>
-                    <p style={S.p}>
-                        Traditional social networks often pull students toward comparison, distraction, and passive scrolling. Professional platforms, on the other hand, can feel intimidating and irrelevant to someone who hasn't even started their career yet. Chavee sits deliberately in between — a safe, supportive ecosystem where students can genuinely grow.
-                    </p>
-                    <p style={S.p}>
-                        We do this by bringing together four things that, until now, have lived in separate apps, separate WhatsApp groups, and separate corners of the internet:
-                    </p>
-                    <ul style={S.ul}>
-                        <li style={S.li}>
-                            <span style={S.strong}>Learn</span> — peer-to-peer mentorship, structured study groups, and certified language training through Study Sync
-                        </li>
-                        <li style={S.li}>
-                            <span style={S.strong}>Earn</span> — a marketplace of gigs, freelance opportunities, scholarships, and job listings built specifically for students taking their first steps into paid work
-                        </li>
-                        <li style={S.li}>
-                            <span style={S.strong}>Network</span> — genuine connections with peers across colleges, cities, and even countries, built around shared interests rather than follower counts
-                        </li>
-                        <li style={S.li}>
-                            <span style={S.strong}>Events</span> — campus events, workshops, hackathons, and webinars that bring the online community into real, offline experiences
-                        </li>
-                    </ul>
-                    <p style={S.p}>
-                        Every feature on Chavee is designed around one question: does this genuinely help a student belong, learn, or earn? If the answer is no, it doesn't make it onto the platform.
-                    </p>
-
-                    <h2 style={S.h2}>Our Journey</h2>
-                    <p style={S.p}>
-                        Chavee was born and designed in Kerala, a state with one of India's highest literacy rates and a long-standing culture of educational ambition. We started small — building custom study circles and peer mentoring systems focused on technology and language courses, testing what students actually needed rather than guessing from a boardroom.
-                    </p>
-                    <p style={S.p}>
-                        What we learned early on shaped everything that came after: students don't just want another app to check. They want a place where they can find a study partner for tomorrow's exam, pick up a freelance design gig that pays for their semester's expenses, practice a new language with a native speaker their own age, and show up to a workshop that actually teaches them something useful — all without leaving one ecosystem.
-                    </p>
-                    <p style={S.p}>
-                        Today, Chavee is growing across universities and colleges in India, one campus at a time. Every new student who joins doesn't just get access to a platform — they become part of a growing network of ambitious peers who are figuring things out together, the same way we were when we started.
-                    </p>
-
-                    <h2 style={S.h2}>What Makes Chavee Different</h2>
-                    <p style={S.p}>
-                        <span style={S.strong}>Built for students, not adapted for them.</span> Chavee wasn't originally built for professionals and then simplified for students. Every decision — from our four core pillars to our gamified XP and badge system — was made with a college student's actual daily reality in mind: tight budgets, exam stress, career uncertainty, and a genuine hunger to prove themselves.
-                    </p>
-                    <p style={S.p}>
-                        <span style={S.strong}>Verified, safe, and moderated.</span> Every college on Chavee goes through a verification process. We take community safety seriously, with active moderation, a reporting system for inappropriate content, and privacy-first design choices that keep sensitive student information — like resumes, contact details, and personal data — protected and never exposed without consent.
-                    </p>
-                    <p style={S.p}>
-                        <span style={S.strong}>Skill monetization from day one.</span> Most students don't get their first real taste of earning money until years into their career. Chavee's Earn marketplace changes that — letting students post gigs, apply for freelance work, and build a genuine portfolio of paid experience while they're still studying.
-                    </p>
-                    <p style={S.p}>
-                        <span style={S.strong}>Peer-to-peer mentorship at scale.</span> Study Sync, our flagship mentorship program, connects students who need help in a subject with peers or seniors who've already mastered it — creating a self-sustaining cycle of knowledge-sharing that doesn't rely on expensive tutoring or formal programs.
-                    </p>
-                    <p style={S.p}>
-                        <span style={S.strong}>Gamification that actually motivates.</span> Every meaningful action on Chavee — completing your profile, helping a peer, finishing a gig, attending an event — earns XP and unlocks badges, from Bronze to Platinum tier. It's a small design choice with a real effect: students stay engaged not because they're addicted to scrolling, but because they're genuinely making progress.
-                    </p>
-
-                    <h2 style={S.h2}>Our Founders & Leadership</h2>
-                    <p style={S.p}>
-                        Chavee was founded and is led by a small, hands-on team based in Kerala, India — <span style={S.strong}>Akshay</span> (Founder) leads the platform's vision, engineering, and overall growth strategy, driving the technical direction that has taken Chavee from an early concept to a live, functioning platform used by real students. <span style={S.strong}>Irfhan</span> (Co-founder) drives operations, community scaling, business development, and campus partnerships — the on-the-ground work of getting Chavee in front of the students who need it, building relationships with colleges, and shaping the ecosystem strategy that connects every feature of the platform together.
-                    </p>
-                    <p style={S.p}>
-                        Both founders share a background rooted in understanding what students actually need — not from market research reports, but from direct, ongoing conversations with the students Chavee serves every day.
-                    </p>
-
-                    <h2 style={S.h2}>Why Kerala, Why Now</h2>
-                    <p style={S.p}>
-                        Kerala has long been recognized for its educational achievements — but access to structured mentorship, real-world skill-building, and early income opportunities for students hasn't kept pace with the state's academic ambition. Chavee was built to close that gap, starting in the region we know best, with plans to expand across Indian campuses as the platform grows.
-                    </p>
-                    <p style={S.p}>
-                        India is home to one of the largest college-going populations in the world, and Gen Z students are more digitally native, more entrepreneurially minded, and more eager to build real skills early than any generation before them. Chavee exists to meet that ambition with the right tools, at the right time.
-                    </p>
-
-                    <h2 style={S.h2}>Our Commitment to Students</h2>
-                    <p style={S.p}>
-                        We know that trust is everything when you're asking students to share their profiles, their work, and their time on a platform. That's why safety, privacy, and genuine usefulness are non-negotiable principles at Chavee — not features we bolt on later, but the foundation everything else is built on.
-                    </p>
-                    <p style={S.p}>
-                        We're not trying to be the next big social network chasing screen time. We're trying to be the platform students actually thank later — the one where they found their first freelance client, their study partner for a make-or-break exam, their mentor for a subject they were about to fail, or the community that made a new city feel a little less lonely.
-                    </p>
-
-                    <h2 style={S.h2}>Join the Movement</h2>
-                    <p style={S.p}>
-                        Chavee is more than a platform — it's a growing community of students who believe college should be about more than just grades. It should be about belonging somewhere, learning constantly, and earning your first real wins — academic, financial, and personal — before you even graduate.
-                    </p>
-                    <p style={S.p}>
-                        If you're a student in Kerala, or anywhere in India, ready to build real skills, real connections, and a real head start on your future, Chavee is built for you.
-                    </p>
-                    <p style={{ ...S.p, fontWeight: 700, marginTop: '2rem' }}>
-                        Ready to get started? <Link to="/signup" style={S.link}>Sign up free at chavee.in</Link> and join thousands of students already building their future on Chavee.
-                    </p>
-
-                    <p style={S.italic}>
-                        Chavee is developed and operated by Chavee, based in Tirur, Kerala, India.
-                    </p>
-                </article>
-            </main>
-
-            <div style={{ marginTop: 'auto' }}>
-                <Footer />
+            {/* ── Stats bar — real live numbers via the same hook Landing.jsx
+                 uses (useLandingStats). "College Partners" from the reference
+                 is omitted: no real data anywhere backs that concept. ── */}
+            <div style={{ ...S.container, marginTop: '-2.5rem', position: 'relative', zIndex: 2 }}>
+                <div style={{ ...S.card, padding: '1.5rem 2rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1.5rem', textAlign: 'center' }}>
+                    {[
+                        { icon: '🧑‍🎓', label: 'Active Students', value: stats.students },
+                        { icon: '🏘️', label: 'Communities', value: stats.communities },
+                        { icon: '🎪', label: 'Events Hosted', value: stats.events },
+                        { icon: '💼', label: 'Opportunities', value: stats.opportunities },
+                    ].map(s => (
+                        <div key={s.label}>
+                            <div style={{ fontSize: '1.3rem', marginBottom: '0.25rem' }}>{s.icon}</div>
+                            <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--text-primary)' }}>{s.value}+</div>
+                            <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontWeight: 600 }}>{s.label}</div>
+                        </div>
+                    ))}
+                </div>
             </div>
+
+            {/* ── Why Chavee Exists + Mission/Vision ── */}
+            <section style={{ ...S.container, padding: '4.5rem 1.5rem 3rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2.5rem', alignItems: 'start' }}>
+                    <div>
+                        <p style={S.sectionLabel}>Our Purpose</p>
+                        <h2 style={S.h2}>Why Chavee Exists</h2>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.75, marginBottom: '1rem' }}>
+                            To empower students with the right tools, opportunities and community to grow, build and belong — all in one place.
+                        </p>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.75 }}>
+                            We bring everything a student needs into one space — learning, communities, jobs, events and upskilling — to make growth simpler, faster and more meaningful. Chavee wasn't built for professionals and simplified for students — every decision was made with a college student's actual daily reality in mind: tight budgets, exam stress, career uncertainty, and a genuine hunger to prove themselves.
+                        </p>
+                    </div>
+                    <div style={{ display: 'grid', gap: '1.5rem' }}>
+                        <div style={{ ...S.card, padding: '2rem', background: 'var(--peacock-green)', border: 'none' }}>
+                            <div style={{ fontSize: '1.6rem', marginBottom: '0.75rem' }}>🎯</div>
+                            <h3 style={{ color: '#fff', fontSize: '1.1rem', fontWeight: 800, margin: '0 0 0.5rem' }}>Our Mission</h3>
+                            <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: '0.85rem', lineHeight: 1.6, margin: 0 }}>
+                                To empower students with the right tools, opportunities and community to grow, build and belong.
+                            </p>
+                        </div>
+                        <div style={{ ...S.card, padding: '2rem' }}>
+                            <div style={{ fontSize: '1.6rem', marginBottom: '0.75rem' }}>👁️</div>
+                            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: '0 0 0.5rem', color: 'var(--text-primary)' }}>Our Vision</h3>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.6, margin: 0 }}>
+                                To become the most trusted and loved platform where every student's journey from learning to success is seamless and accessible.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* ── Our Journey ── */}
+            <section style={{ ...S.container, padding: '2rem 1.5rem 3rem' }}>
+                <div style={{ ...S.card, padding: '2.5rem 2rem', background: 'var(--bg-elevated)' }}>
+                    <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+                        <p style={S.sectionLabel}>Our Journey</p>
+                        <h2 style={S.h2}>From an Idea to a Movement</h2>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1.5rem' }}>
+                        {JOURNEY.map(j => (
+                            <div key={j.title} style={{ textAlign: 'center' }}>
+                                <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--peacock-green)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.3rem', margin: '0 auto 0.85rem' }}>{j.icon}</div>
+                                <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-primary)', marginBottom: '0.35rem' }}>{j.title}</div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>{j.desc}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
+            {/* ── What Makes Chavee Different ── */}
+            <section style={{ ...S.container, padding: '0 1.5rem 3rem' }}>
+                <div style={{ ...S.card, padding: '2.5rem 2rem', background: '#0F172A', border: 'none' }}>
+                    <p style={{ ...S.sectionLabel, textAlign: 'center', color: '#34D399' }}>What Makes Chavee Different</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '2rem', marginTop: '1.5rem' }}>
+                        {DIFFERENTIATORS.map(d => (
+                            <div key={d.title} style={{ textAlign: 'center' }}>
+                                <div style={{ width: 48, height: 48, borderRadius: '50%', border: '1px solid #34D39960', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', margin: '0 auto 0.85rem', color: '#34D399' }}>{d.icon}</div>
+                                <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#fff', marginBottom: '0.35rem' }}>{d.title}</div>
+                                <div style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{d.desc}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
+            {/* ── Meet Our Founders — no real photos exist anywhere in this
+                 project (checked public/, Storage buckets, and profiles for
+                 the founders' known emails — none found), so initials avatars
+                 are used instead of stock photos. Social links below are the
+                 real URLs the user provided directly. ── */}
+            <section style={{ ...S.container, padding: '0 1.5rem 4rem' }}>
+                <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+                    <p style={S.sectionLabel}>Meet Our Founders</p>
+                    <h2 style={S.h2}>The Minds Behind Chavee</h2>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
+                    {FOUNDERS.map(f => (
+                        <div key={f.name} style={{ ...S.card, padding: '1.75rem', display: 'flex', gap: '1.25rem', borderBottom: '3px solid var(--peacock-green)' }}>
+                            <InitialsAvatar initials={f.initials} gradient={f.color} photo={f.photo} alt={f.alt} />
+                            <div>
+                                <h3 style={{ margin: '0 0 0.15rem', fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>{f.name}</h3>
+                                <div style={{ color: 'var(--peacock-green)', fontWeight: 700, fontSize: '0.8rem', marginBottom: '0.6rem' }}>{f.role}</div>
+                                <p style={{ margin: '0 0 0.85rem', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>{f.bio}</p>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    {f.links.map(l => (
+                                        <a
+                                            key={l.label}
+                                            href={l.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            aria-label={`${f.name} on ${l.label}`}
+                                            title={l.label}
+                                            style={{
+                                                width: 30, height: 30, borderRadius: '50%', background: 'var(--peacock-green)',
+                                                color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                fontSize: l.icon === 'in' ? '0.72rem' : '0.85rem', fontWeight: 800, textDecoration: 'none'
+                                            }}
+                                        >
+                                            {l.icon}
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </section>
+
+            {/* ── Closing CTA — no real photo exists for this project, so a
+                 plain brand-color panel is used instead of the reference's
+                 stock/group photo. ── */}
+            <section style={{ background: 'linear-gradient(135deg, #115E59 0%, #059669 100%)', padding: '3.5rem 1.5rem' }}>
+                <div style={{ ...S.container, textAlign: 'center' }}>
+                    <h2 style={{ color: '#fff', fontSize: 'clamp(1.6rem, 4vw, 2.3rem)', fontWeight: 900, margin: '0 0 0.75rem' }}>Ready to Grow, Build & Belong?</h2>
+                    <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: '0.95rem', maxWidth: 480, margin: '0 auto 1.75rem' }}>
+                        Join thousands of students who are already building their future with Chavee.
+                    </p>
+                    <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <Link to="/signup" style={{ padding: '0.85rem 1.75rem', borderRadius: 12, fontSize: '0.92rem', fontWeight: 800, background: '#fff', color: 'var(--peacock-green)', textDecoration: 'none' }}>Join Now</Link>
+                        <button onClick={handleExplore} style={{ padding: '0.85rem 1.75rem', borderRadius: 12, fontSize: '0.92rem', fontWeight: 700, background: 'transparent', border: '1px solid rgba(255,255,255,0.5)', color: '#fff', cursor: 'pointer' }}>Explore Platform</button>
+                    </div>
+                    <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.85rem', marginTop: '1.75rem' }}>
+                        Want to help us build this? <Link to="/careers" style={{ color: '#fff', fontWeight: 700, textDecoration: 'underline' }}>See open roles</Link> · Have a question? <Link to="/contact-us" style={{ color: '#fff', fontWeight: 700, textDecoration: 'underline' }}>Contact us</Link>
+                    </p>
+                </div>
+            </section>
+
+            <Footer />
         </div>
     );
 }

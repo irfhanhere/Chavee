@@ -7,9 +7,9 @@
     <!-- ═══ PERFORMANCE — Preconnects & DNS prefetch ══════════════════ -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="preconnect" href="https://ytkgatduaeqctomfferr.supabase.co" />
+    <link rel="preconnect" href="https://dtokistffdnycrzbmxcr.supabase.co" />
     <link rel="dns-prefetch" href="//fonts.googleapis.com" />
-    <link rel="dns-prefetch" href="//ytkgatduaeqctomfferr.supabase.co" />
+    <link rel="dns-prefetch" href="//dtokistffdnycrzbmxcr.supabase.co" />
     <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
 
     <!-- ═══ FAVICONS & PWA ════════════════════════════════════════════ -->
@@ -20,19 +20,29 @@
     <link rel="apple-touch-icon" href="/favicon.png" />
     <link rel="manifest" href="/manifest.json" />
 
-    <!-- ═══ PRIMARY SEO META ══════════════════════════════════════════ -->
+    <!-- ═══ PRIMARY SEO META ══════════════════════════════════════════
+         description, canonical, robots, and OG title/description/url
+         below are now set per-route by src/components/SEO.jsx
+         (react-helmet-async), one real value per real page — NOT
+         duplicated here, since Helmet appends rather than replaces raw
+         static tags, and e.g. "index,follow" + "noindex,nofollow" both
+         present is worse than either alone. No static robots tag means
+         "indexable" by default (browser/crawler spec default when the
+         tag is absent), matching the old explicit "index, follow" for
+         every route Helmet doesn't mark noindex. This static <title>
+         stays as the initial paint value (Helmet overwrites document.title
+         directly, no duplication risk) and is also what non-JS crawlers/
+         link-preview bots see, since they never run the client-side
+         per-route override. ══════════════════════════════════════════ -->
     <title>Chavee — India's First Student Social Platform | Learn Earn Network Belong</title>
-    <meta name="description" content="Chavee is India's first student social networking platform. Learn languages, earn through gigs, find mentors, join communities and attend events. Free for all college students. Based in Kerala, growing across India." />
     <meta name="keywords" content="student platform India, India first student social network, student community India, learn Korean India, earn as student India, student networking platform India, college students India, scholarship platform India, student events India, Chavee, chavee.in, Kerala student platform, student social media India, campus platform India, Gen Z student platform, student gig marketplace India, peer mentorship students India, language learning students India, study sync India, student mentor platform India" />
     <meta name="author" content="Chavee Technologies" />
-    <meta name="robots" content="index, follow" />
     <meta name="language" content="English" />
     <meta name="revisit-after" content="7 days" />
-    <link rel="canonical" href="https://chavee.in" />
 
     <!-- ═══ GEO / LOCAL SEO ═══════════════════════════════════════════ -->
     <meta name="geo.region" content="IN-KL" />
-    <meta name="geo.placename" content="Malappuram, Kerala, India" />
+    <meta name="geo.placename" content="Calicut, Kerala, India" />
     <meta name="geo.position" content="11.0510;76.0711" />
     <meta name="ICBM" content="11.0510, 76.0711" />
     <meta name="DC.title" content="Chavee — Kerala Student Platform" />
@@ -41,11 +51,9 @@
     <link rel="alternate" hreflang="en-in" href="https://chavee.in" />
     <link rel="alternate" hreflang="x-default" href="https://chavee.in" />
 
-    <!-- ═══ OPEN GRAPH ════════════════════════════════════════════════ -->
+    <!-- ═══ OPEN GRAPH — og:url/title/description are per-route via
+         SEO.jsx, same reasoning as above; not duplicated here. ══════════ -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://chavee.in" />
-    <meta property="og:title" content="Chavee — India's First Student Social Platform" />
-    <meta property="og:description" content="Learn languages, earn with skills, find mentors and join student communities. Free for all college students in India." />
     <meta property="og:image" content="https://chavee.in/assets/og-banner.jpg" />
     <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
@@ -89,7 +97,7 @@
       "name": "Chavee",
       "alternateName": "Chavee Student Platform",
       "url": "https://chavee.in",
-      "logo": "https://chavee.in/assets/logo.png",
+      "logo": "https://chavee.in/logo.png",
       "description": "India's first student social networking platform for college students",
       "foundingDate": "2026",
       "foundingLocation": "Kerala, India",
@@ -112,10 +120,11 @@
       },
       "address": {
         "@type": "PostalAddress",
-        "addressLocality": "Malappuram",
+        "streetAddress": "2nd Floor, West End Tower, T. P. Road",
+        "addressLocality": "Calicut",
         "addressRegion": "Kerala",
         "addressCountry": "IN",
-        "postalCode": "676101"
+        "postalCode": "673004"
       }
     }
     </script>
@@ -152,11 +161,6 @@
         "price": "0",
         "priceCurrency": "INR"
       },
-      "aggregateRating": {
-        "@type": "AggregateRating",
-        "ratingValue": "4.8",
-        "ratingCount": "127"
-      },
       "description": "India's first student social platform for learning, earning, networking and events"
     }
     </script>
@@ -173,10 +177,11 @@
       "email": "info@chavee.in",
       "address": {
         "@type": "PostalAddress",
-        "addressLocality": "Malappuram",
+        "streetAddress": "2nd Floor, West End Tower, T. P. Road",
+        "addressLocality": "Calicut",
         "addressRegion": "Kerala",
         "addressCountry": "IN",
-        "postalCode": "676101"
+        "postalCode": "673004"
       },
       "geo": {
         "@type": "GeoCoordinates",

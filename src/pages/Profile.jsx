@@ -432,7 +432,7 @@ export default function Profile() {
                     {/* Banner */}
                     <div style={{ height: 140, background: profile.banner_url ? `url(${profile.banner_url}) center/cover` : 'linear-gradient(135deg, var(--bg-mint), var(--peacock-green))' }}></div>
                     
-                    <div style={{ padding: '0 2rem 2rem 2rem', marginTop: -50, display: 'flex', gap: '2rem', alignItems: 'flex-start', flexWrap: 'wrap', position: 'relative' }}>
+                    <div className="profile-header-row" style={{ padding: '0 2rem 2rem 2rem', marginTop: -50, display: 'flex', gap: '2rem', alignItems: 'flex-start', flexWrap: 'wrap', position: 'relative' }}>
                         
                         {/* Avatar */}
                         <div style={{ flexShrink: 0, position: 'relative' }}>
@@ -446,7 +446,7 @@ export default function Profile() {
                         </div>
 
                         {/* Info */}
-                        <div style={{ flex: 1, minWidth: 280 }}>
+                        <div className="profile-info-col" style={{ flex: 1, minWidth: 280 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
                                 <div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
@@ -498,16 +498,20 @@ export default function Profile() {
                                             </>
                                         )}
                                         {connectionStatus === 'connected' && (
-                                            <>
-                                                <button style={{ padding: '0.5rem 1rem', borderRadius: 8, background: 'var(--bg-mint)', color: 'var(--peacock-green)', border: '1px solid var(--border-mint)', fontWeight: 700, cursor: 'default' }}>
-                                                    Connected ✓
-                                                </button>
-                                                <button onClick={() => handleMessage(profile.id)} disabled={isActionLoading} style={{ padding: '0.5rem 1rem', borderRadius: 8, background: 'var(--peacock-green)', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
-                                                    Message
-                                                </button>
-                                            </>
+                                            <button style={{ padding: '0.5rem 1rem', borderRadius: 8, background: 'var(--bg-mint)', color: 'var(--peacock-green)', border: '1px solid var(--border-mint)', fontWeight: 700, cursor: 'default' }}>
+                                                Connected ✓
+                                            </button>
                                         )}
-                                        
+                                        {/* Message is intentionally NOT gated on connectionStatus — messaging is
+                                            fully open (anyone can message anyone from a profile); only the
+                                            connection state above controls the Connect/Accept/Decline affordance.
+                                            Previously this button only rendered when connectionStatus === 'connected',
+                                            which contradicted that — same handleMessage/start_direct_conversation flow,
+                                            just no longer gated on being connected first. */}
+                                        <button onClick={() => handleMessage(profile.id)} disabled={isActionLoading} style={{ padding: '0.5rem 1rem', borderRadius: 8, background: 'var(--peacock-green)', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                                            {isActionLoading ? <ButtonSpinner/> : 'Message'}
+                                        </button>
+
                                         <button onClick={() => setMenuOpen(!menuOpen)} style={{ padding: '0.5rem', borderRadius: 8, background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', cursor: 'pointer' }}>
                                             •••
                                         </button>
@@ -563,17 +567,18 @@ export default function Profile() {
                             </div>
 
                             {/* Stat Cards */}
-                            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                            <div className="profile-stat-row" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                                 {[
                                     { label: 'Connections', value: stats.connectionsCount, onClick: () => setConnectionsModal({ open: true }) },
                                     { label: 'Communities', value: stats.communitiesCount },
                                     { label: 'Jobs Applied', value: stats.jobsApplied },
                                     { label: 'XP Points', value: stats.xp }
                                 ].map(s => (
-                                    <div 
-                                        key={s.label} 
+                                    <div
+                                        key={s.label}
                                         onClick={s.onClick}
-                                        style={{ 
+                                        className="profile-stat-card"
+                                        style={{
                                             background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '0.75rem 1.25rem', textAlign: 'center', minWidth: 100,
                                             cursor: s.onClick ? 'pointer' : 'default',
                                             transition: s.onClick ? 'all 0.2s' : 'none'

@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient.js';
 import { ChaveeLogo } from '../Logo.jsx';
 import { PageLoader } from './Spinner.jsx';
 import HeaderActions from './HeaderActions.jsx';
+import SEO from './SEO.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const TIER_NAMES  = { 4: 'Platinum', 3: 'Gold', 2: 'Silver', 1: 'Bronze' };
@@ -244,6 +245,18 @@ export default function AppShell({ children }) {
         return location.pathname === path;
     };
 
+    // Bottom tab bar's own active check — '/' redirects logged-in users to
+    // '/dashboard' (Landing.jsx's own useEffect), so by the time anyone is
+    // inside AppShell the real pathname is always '/dashboard', never '/'.
+    // isActive('/') above would never match there; Home needs to treat both
+    // as the same tab. Kept separate from isActive rather than changing it,
+    // since isActive also drives the untouched desktop sidebar.
+    const isBottomNavActive = (path) => {
+        if (path === '/') return location.pathname === '/' || location.pathname === '/dashboard';
+        if (path === '/events') return location.pathname.startsWith('/events');
+        return location.pathname === path;
+    };
+
     /* ── Styles ─────────────────────────────────────────────────── */
     const S = {
         layout: {
@@ -376,9 +389,12 @@ export default function AppShell({ children }) {
     const tierColor = gamification ? (TIER_COLORS[gamification.level] || '#D97706') : '#D97706';
     const tierName  = gamification ? (TIER_NAMES[gamification.level]  || 'Bronze')  : 'Bronze';
 
-    const SidebarNav = () => (
+    // hidePrimary: the mobile drawer no longer needs to duplicate the 5
+    // primary links now that they live in the persistent bottom tab bar —
+    // desktop sidebar keeps them (hidePrimary defaults false there).
+    const SidebarNav = ({ hidePrimary = false }) => (
         <>
-            {NAV_LINKS.map(l => (
+            {!hidePrimary && NAV_LINKS.map(l => (
                 <Link
                     key={l.path}
                     to={l.path}
@@ -434,49 +450,26 @@ export default function AppShell({ children }) {
 
     return (
         <div style={S.layout}>
+            {/* Every route rendered through AppShell requires login — never
+                indexable, so this one tag covers all of them without
+                needing a <SEO noindex/> in each individual page file. */}
+            <SEO noindex />
+
             {/* ── Header ── */}
             <header className="app-header" style={S.header}>
-                {/* Left side: Logo — full logo on desktop/tablet, favicon-only mark on mobile */}
+                {/* Left side: Avatar (dropdown trigger) + Logo — matches the reference
+                    header order (avatar leftmost, then logo) shown consistently across
+                    every reference screenshot. Avatar simplified to icon-only at every
+                    width — no reference screenshot shows name/role text or a chevron
+                    next to it, and this also removes the previous desktop-vs-mobile
+                    inconsistency (name+chevron used to be hidden-mobile only). */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
-                    <Link to="/dashboard" style={{ textDecoration: 'none', flexShrink: 0 }}>
-                        <span className="hidden-mobile" style={{ display: 'inline-flex' }}>
-                            <ChaveeLogo height={34} />
-                        </span>
-                        <span className="show-mobile" style={{ display: 'none', alignItems: 'center' }}>
-                            <ChaveeLogo height={36} iconOnly />
-                        </span>
-                    </Link>
-                </div>
-
-                {/* Middle: Global Search */}
-                <div style={{ flex: 1, maxWidth: 500, margin: '0 2rem' }} className="hidden-mobile">
-                    <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', borderRadius: 24, padding: '0.55rem 1.25rem', gap: '0.6rem' }}>
-                        <span style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>🔍</span>
-                        <input 
-                            type="text" 
-                            placeholder="Search jobs, courses, scholarships, events..." 
-                            style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none', width: '100%', fontSize: '0.88rem', fontFamily: 'inherit' }}
-                        />
-                    </div>
-                </div>
-
-                {/* Right side: XP pill + Actions + Avatar */}
-                <div className="header-right-group" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                    <HeaderActions user={user} />
-                    {/* User Profile Button / Dropdown */}
                     {!previewMode ? (
                         <div ref={dropdownRef} style={{ position: 'relative' }}>
-                            <div onClick={() => setShowDropdown(!showDropdown)} title="Account" style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', cursor: 'pointer', padding: '0.25rem 0.5rem', borderRadius: 32, transition: 'background 0.2s', background: showDropdown ? 'var(--bg-elevated)' : 'transparent' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'} onMouseLeave={e => { if (!showDropdown) e.currentTarget.style.background = 'transparent'; }}>
+                            <div onClick={() => setShowDropdown(!showDropdown)} title="Account" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '0.15rem', borderRadius: '50%', transition: 'background 0.2s', background: showDropdown ? 'var(--bg-elevated)' : 'transparent' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'} onMouseLeave={e => { if (!showDropdown) e.currentTarget.style.background = 'transparent'; }}>
                                 {renderAvatar(profile?.avatar_url, profile?.name || user?.email, 36, '0.9rem')}
-                                <div className="hidden-mobile" style={{ display: 'flex', flexDirection: 'column', minWidth: 80 }}>
-                                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 }}>{profile?.name || user?.email?.split('@')[0] || 'User'}</span>
-                                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.2 }}>Student</span>
-                                </div>
-                                <svg className="hidden-mobile" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transform: showDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
-                                    <polyline points="6 9 12 15 18 9"></polyline>
-                                </svg>
                             </div>
-                            
+
                             <AnimatePresence>
                                 {showDropdown && (
                                     <motion.div
@@ -487,7 +480,10 @@ export default function AppShell({ children }) {
                                         style={{
                                             position: 'absolute',
                                             top: 'calc(100% + 0.5rem)',
-                                            right: 0,
+                                            /* Anchored left, not right — the trigger now lives at the far
+                                               left of the header, so a right-anchored panel would extend
+                                               off-screen to the left. Opening rightward keeps it on-screen. */
+                                            left: 0,
                                             width: 240,
                                             background: 'var(--bg-surface)',
                                             border: '1px solid var(--border-color)',
@@ -529,11 +525,11 @@ export default function AppShell({ children }) {
                                         </Link>
 
                                         <div style={{ height: 1, background: 'var(--border-color)', margin: '0.25rem 0' }} />
-                                        
+
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 0.75rem', color: 'var(--text-muted)', borderRadius: 8, fontSize: '0.85rem', fontWeight: 600, cursor: 'not-allowed', opacity: 0.7 }}>
                                             <span style={{ fontSize: '1.1rem' }}>🔁</span> Switch Account <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--bg-elevated)', padding: '0.1rem 0.4rem', borderRadius: 4 }}>Soon</span>
                                         </div>
-                                        
+
                                         <div onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 0.75rem', color: '#EF4444', borderRadius: 8, fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                                             <span style={{ fontSize: '1.1rem' }}>🚪</span> Log Out
                                         </div>
@@ -551,6 +547,25 @@ export default function AppShell({ children }) {
                         </Link>
                     )}
 
+                    <Link to="/dashboard" style={{ textDecoration: 'none', flexShrink: 0 }}>
+                        <span className="hidden-mobile" style={{ display: 'inline-flex' }}>
+                            <ChaveeLogo height={34} />
+                        </span>
+                        <span className="show-mobile" style={{ display: 'none', alignItems: 'center' }}>
+                            <ChaveeLogo height={36} iconOnly />
+                        </span>
+                    </Link>
+                </div>
+
+                {/* Right side: Search + Messages + Notifications (all inside HeaderActions,
+                    width-agnostic — same component renders identically at every
+                    breakpoint) + Hamburger (mobile only, unrelated to the reference
+                    pattern — holds Admin Panel/Explore/Log Out, kept as-is). The old
+                    decorative desktop-only search <input> is gone — replaced by the
+                    real search icon inside HeaderActions. */}
+                <div className="header-right-group" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                    <HeaderActions user={user} />
+
                     {/* Hamburger — mobile */}
                     <button
                         onClick={() => setSidebarOpen(v => !v)}
@@ -561,7 +576,6 @@ export default function AppShell({ children }) {
                         {sidebarOpen ? '✕' : '☰'}
                     </button>
                 </div>
-
             </header>
 
             {/* ── Body ── */}
@@ -591,7 +605,7 @@ export default function AppShell({ children }) {
                             }}
                             onClick={e => e.stopPropagation()}
                         >
-                            <SidebarNav />
+                            <SidebarNav hidePrimary />
                             <hr style={{ ...S.divider, marginTop: '0.5rem' }} />
                             <button
                                 onClick={handleLogout}
@@ -605,10 +619,27 @@ export default function AppShell({ children }) {
                 )}
 
                 {/* Main content */}
-                <main style={S.main}>
+                <main style={S.main} className="app-main-content">
                     {children}
                 </main>
             </div>
+
+            {/* Persistent mobile bottom tab bar — the 5 primary NAV_LINKS, same
+                routes as the desktop sidebar. Desktop untouched: hidden ≥769px
+                via CSS below, same breakpoint as the rest of this file's
+                responsive rules. */}
+            <nav className="mobile-bottom-nav" aria-label="Primary">
+                {NAV_LINKS.map(l => (
+                    <Link
+                        key={l.path}
+                        to={l.path === '/' ? '/dashboard' : l.path}
+                        className={`mobile-bottom-nav-item${isBottomNavActive(l.path) ? ' active' : ''}`}
+                    >
+                        <span className="mobile-bottom-nav-icon">{l.icon}</span>
+                        <span>{l.label}</span>
+                    </Link>
+                ))}
+            </nav>
 
             {/* Preview Modal */}
             <AnimatePresence>
@@ -680,6 +711,52 @@ export default function AppShell({ children }) {
                 @media (max-width: 480px) {
                     .app-header { padding: 0 1rem; }
                     .header-right-group { gap: 0.5rem; }
+                }
+
+                /* Persistent mobile bottom tab bar — hidden entirely ≥769px so
+                   desktop is untouched (same breakpoint as .shell-sidebar above). */
+                .mobile-bottom-nav { display: none; }
+                @media (max-width: 768px) {
+                    .mobile-bottom-nav {
+                        display: flex;
+                        position: fixed;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        z-index: 150; /* above page content, below the drawer overlay (190) and header (200) */
+                        background: var(--bg-surface);
+                        border-top: 1px solid var(--border-color);
+                        box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+                        padding: 0.35rem 0.25rem calc(0.35rem + env(safe-area-inset-bottom, 0px));
+                    }
+                }
+                .mobile-bottom-nav-item {
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 2px;
+                    padding: 0.3rem 0.1rem;
+                    text-decoration: none;
+                    color: var(--text-muted);
+                    font-size: 0.65rem;
+                    font-weight: 600;
+                    line-height: 1.1;
+                    text-align: center;
+                }
+                .mobile-bottom-nav-item.active {
+                    color: var(--peacock-green);
+                    font-weight: 800;
+                }
+                .mobile-bottom-nav-icon { font-size: 1.3rem; line-height: 1; }
+
+                /* Room for the fixed bottom bar so it never clips the end of
+                   scrollable page content. Bar's own real height varies slightly
+                   by device (icon+label+padding+safe-area), so this is a bit more
+                   generous than the bar's typical ~60px to comfortably clear it. */
+                @media (max-width: 768px) {
+                    .app-main-content { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
                 }
             `}</style>
         </div>

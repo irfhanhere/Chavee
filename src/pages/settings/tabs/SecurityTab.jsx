@@ -22,7 +22,6 @@ export default function SecurityTab({ user, showToast }) {
         try {
             // In a real scenario, you might need to verify the current password first via a custom Edge Function,
             // or just rely on the user being logged in and using update().
-            console.log('DEBUG auth.updateUser payload:', { action: 'updateUser', fields: { password: '[REDACTED]' } });
             const { error } = await supabase.auth.updateUser({ password: passwordForm.new });
             if (error) throw error;
 
@@ -30,10 +29,9 @@ export default function SecurityTab({ user, showToast }) {
             setPasswordForm({ current: '', new: '', confirm: '' });
 
             // Log security action
-            console.log('DEBUG security_logs insert payload:', { table: 'security_logs', values: { user_id: user.id, action: 'password_change', description: 'User changed their password.' } });
             await supabase.from('security_logs').insert({ user_id: user.id, action: 'password_change', description: 'User changed their password.' });
         } catch (err) {
-            console.error('Failed to change password:', { message: err.message, code: err.code, status: err.status, details: err.details, hint: err.hint, full: err });
+            console.error('Failed to change password:', err);
             showToast(err.message, 'error');
         } finally {
             setUpdatingPassword(false);
@@ -103,37 +101,25 @@ export default function SecurityTab({ user, showToast }) {
                 </button>
             </div>
 
-            {/* Login Sessions */}
+            {/* Login Sessions — was fully hardcoded fake data (a fake Windows/Chrome
+                session, a fake "iPhone 13 • Safari, Mumbai, India" session with a
+                Revoke button with no onClick at all — clicking it did nothing).
+                Supabase Auth doesn't expose a client-facing "list all my device
+                sessions" API (by design — this needs a real, actively-populated
+                sessions table with per-login writes to build honestly), so this
+                is now an honest not-available state instead of fabricated
+                security data, matching the convention used elsewhere for
+                genuinely unbuildable features. */}
             <div style={{ background: 'var(--bg-surface)', padding: '2rem', borderRadius: 16, border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
                 <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 800 }}>Login Sessions</h2>
                 <p style={{ margin: '0 0 2rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>These are the devices that have logged into your account. Revoke any sessions that you do not recognize.</p>
-                
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    
-                    {/* Current Session Mock */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', border: '1px solid var(--peacock-green)', borderRadius: 12, background: 'rgba(11,143,90,0.05)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                            <div style={{ fontSize: '1.5rem' }}>💻</div>
-                            <div>
-                                <h4 style={{ margin: '0 0 0.25rem 0', color: 'var(--text-primary)' }}>Windows 11 • Chrome</h4>
-                                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Bengaluru, India • 192.168.1.1</p>
-                            </div>
-                        </div>
-                        <span style={{ color: 'var(--peacock-green)', fontWeight: 700, fontSize: '0.85rem' }}>Active Now</span>
-                    </div>
 
-                    {/* Other Session Mock */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 12 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                            <div style={{ fontSize: '1.5rem', color: 'var(--text-muted)' }}>📱</div>
-                            <div>
-                                <h4 style={{ margin: '0 0 0.25rem 0', color: 'var(--text-primary)' }}>iPhone 13 • Safari</h4>
-                                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Mumbai, India • 10.0.0.5</p>
-                            </div>
-                        </div>
-                        <button style={{ background: 'transparent', border: 'none', color: '#DC2626', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>Revoke</button>
-                    </div>
-
+                <div style={{ padding: '2rem', textAlign: 'center', background: 'var(--bg-elevated)', borderRadius: 12, border: '1px dashed var(--border-color)' }}>
+                    <div style={{ fontSize: '1.8rem', marginBottom: '0.75rem' }}>🚧</div>
+                    <p style={{ margin: '0 0 0.4rem', fontWeight: 700, color: 'var(--text-primary)' }}>Not available yet</p>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: 400, marginInline: 'auto' }}>
+                        Per-device session tracking isn't part of the data model yet — this needs a real sessions log, not something we can show honestly today.
+                    </p>
                 </div>
             </div>
 

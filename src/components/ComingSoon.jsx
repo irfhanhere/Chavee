@@ -5,6 +5,7 @@ import { supabase } from '../supabaseClient.js';
 import Navbar from './Navbar.jsx';
 import Footer from './Footer.jsx';
 import Toast, { useToast } from './Toast.jsx';
+import SEO from './SEO.jsx';
 
 export default function ComingSoon({ 
     title = 'Coming Soon', 
@@ -44,6 +45,10 @@ export default function ComingSoon({
 
     return (
         <div style={{ background: '#F8FAFC', minHeight: '100vh', fontFamily: "'Inter', sans-serif", display: 'flex', flexDirection: 'column' }}>
+            {/* path="/resources" — only real usage of this component today
+                (App.jsx). If it's ever reused for a different "coming soon"
+                route, this canonical will need to become a prop too. */}
+            <SEO title={`${title} | Chavee`} description={description} path="/resources" />
             <Navbar />
             <Toast toast={toast} onClose={hideToast} />
 

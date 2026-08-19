@@ -101,8 +101,8 @@ We may update this Refund and Cancellation Policy from time to time, particularl
 For any questions regarding refunds or cancellations, please contact:
 
 **Chavee**
-Adimaparambil House, Ponmundam PO, Ponmundam
-Tirur, Kerala 676106, India
+2nd Floor, West End Tower, T. P. Road, Calicut
+Kerala - 673004, India
 Email: info@chavee.in
 
 ---

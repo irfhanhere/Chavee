@@ -75,8 +75,8 @@ In the rare event that a payment is successfully processed but the corresponding
 If you have questions about how a specific service, feature, or purchase is delivered on Chavee, or if you believe you have not received something you paid for, please contact us at:
 
 **Chavee**
-Adimaparambil House, Ponmundam PO, Ponmundam
-Tirur, Kerala 676106, India
+2nd Floor, West End Tower, T. P. Road, Calicut
+Kerala - 673004, India
 Email: info@chavee.in
 
 We aim to respond to all delivery-related inquiries within 2-3 business days.

@@ -250,9 +250,13 @@ body {
 @media (min-width: 769px) {
   .show-mobile { display: none !important; }
 }
+/* Base rule was missing — only the ≤1024px "show" rule below existed, so
+   this class did nothing at desktop widths (rendered as a plain block/flex
+   div, same as having no class at all) until this default was added. */
+.mobile-home-widgets { display: none; }
 @media (max-width: 1024px) {
   .hidden-tablet { display: none !important; }
-  /* Home tab: Upcoming Event banner / Announcements / Messages preview —
+  /* Home tab: Upcoming Event banner / Announcements / Recent Activity —
      shown only where the desktop right-sidebar widgets (.hidden-tablet)
      that carry the same data are hidden, so it's never shown twice. */
   .mobile-home-widgets { display: flex !important; }
@@ -375,6 +379,36 @@ body {
   border-color: var(--peacock-green);
   color: var(--peacock-green);
   font-weight: 800;
+}
+
+/* ── Profile header: stack avatar/info + single-row stat cards (mobile) ──
+   Profile.jsx's header row (avatar + info column) has no responsive
+   stacking — the info column's inline min-width:280px floor forces the 4
+   stat cards below it (Connections/Communities/Jobs Applied/XP Points) to
+   wrap into a 2x2 grid instead of a single row, confirmed live at 375/390/
+   428px. Stack the header vertically on mobile so the info column (and the
+   stat row inside it) gets the card's full width, and shrink the stat
+   cards themselves so all 4 fit on one line without their own min-width
+   floor squeezing them. !important is required to win over Profile.jsx's
+   inline styles. */
+@media (max-width: 768px) {
+  .profile-header-row {
+    flex-direction: column;
+  }
+  .profile-info-col {
+    min-width: 0 !important;
+    width: 100%;
+  }
+  .profile-stat-row {
+    flex-wrap: nowrap !important;
+    gap: 0.5rem !important;
+    width: 100%;
+  }
+  .profile-stat-card {
+    min-width: 0 !important;
+    flex: 1 1 0%;
+    padding: 0.6rem 0.4rem !important;
+  }
 }
 
 /* ── Safe area for devices with notch (iOS) ── */
@@ -615,5 +649,25 @@ body {
   }
   .proposal-summary-desktop {
     display: flex !important;
+  }
+}
+
+/* ── Footer grid columns (desktop) ──
+   Footer.jsx had `'@media (min-width: 1024px)': {...}` / `'@media
+   (min-width: 768px)': {...}` keys inside plain inline style={{}} objects —
+   that syntax only works with CSS-in-JS libraries (styled-components,
+   emotion), not React's plain inline styles. React silently drops the
+   invalid property (confirmed live via a real "Unsupported style property"
+   console warning), so the Brand and Newsletter footer columns never got
+   their intended desktop sizing — both stayed full-width (grid-column:
+   1 / -1) at every viewport. Real classes + real media queries instead. */
+@media (min-width: 1024px) {
+  .footer-brand-col {
+    grid-column: span 2 !important;
+  }
+}
+@media (min-width: 768px) {
+  .footer-newsletter-col {
+    grid-column: span 2 !important;
   }
 }

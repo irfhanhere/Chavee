@@ -3,6 +3,7 @@ import { supabase } from '../../../supabaseClient.js';
 import DataTable from '../components/DataTable.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import Toast, { useToast } from '../../../components/Toast.jsx';
+import { fetchEmailMap } from '../../../utils/emailLookup.js';
 
 export default function UsersManager() {
     const { toast, showToast, hideToast } = useToast();
@@ -34,16 +35,25 @@ export default function UsersManager() {
                 adminMap[a.user_id] = a.role;
             });
 
-            // Merge
+            // Merge — no email here yet. profiles has no email column at all
+            // (confirmed live); real email only lives in Supabase Auth. Filled
+            // in below via the batched admin-email-lookup Edge Function once
+            // it resolves, so the table renders immediately and emails arrive
+            // a beat later rather than blocking the page.
             const merged = (profiles || []).map(p => ({
                 ...p,
                 role: adminMap[p.id] || 'student', // default student if not in admins table
-                email: p.email || (p.name ? `${p.name.split(' ').join('.').toLowerCase()}@example.com` : `user_${p.id.substring(0,6)}@example.com`), // fallback if we don't have real email in profiles
+                email: null,
                 status: p.status || 'active'
             }));
-            
+
             setUsers(merged);
             setSelectedIds(new Set());
+
+            const { emails, failed } = await fetchEmailMap(merged.map(u => u.id));
+            if (!failed) {
+                setUsers(prev => prev.map(u => ({ ...u, email: emails[u.id] || null })));
+            }
         } catch (err) {
             console.error('Failed to load users:', err);
             showToast('Failed to load users: ' + err.message, 'error');
@@ -112,6 +122,9 @@ export default function UsersManager() {
                 if (error) throw error;
                 showToast(`User status updated to ${newStatus}.`);
             } else if (type === 'reset_password') {
+                // Guarded in the menu below too (option is only offered when a real
+                // email resolved) — this is defense in depth, not the primary gate.
+                if (!row.email) throw new Error('No real email on file for this user — cannot send a reset email.');
                 const { error } = await supabase.auth.resetPasswordForEmail(row.email);
                 if (error) throw error;
                 showToast(`Password reset email sent to ${row.email}.`);
@@ -153,7 +166,7 @@ export default function UsersManager() {
                 u.id,
                 `"${(u.full_name || '').replace(/"/g, '""')}"`,
                 `"${u.username || ''}"`,
-                `"${u.email || ''}"`,
+                `"${u.email || '—'}"`,
                 u.role || 'Student',
                 u.status || 'active',
                 `"${(u.college || '').replace(/"/g, '""')}"`,
@@ -310,7 +323,11 @@ export default function UsersManager() {
                                     )}
                                 </optgroup>
                                 <optgroup label="Account">
-                                    <option value="reset_password">Reset Password</option>
+                                    {/* Only offered when a real email actually resolved from the
+                                        admin-email-lookup Edge Function — previously this always
+                                        fired against a fabricated @example.com address, so the
+                                        "sent!" toast was never true for anyone. */}
+                                    {row.email && <option value="reset_password">Reset Password</option>}
                                 </optgroup>
                             </select>
                         </div>

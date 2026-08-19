@@ -11,6 +11,7 @@ export default function CommunitiesTab({ user, onCommunityClick }) {
     const { notifiedFeatures, loadingFeatures, toggleNotify } = useNotifyMe(user);
     const [communities, setCommunities] = useState([]);
     const [myCommunityIds, setMyCommunityIds] = useState(new Set());
+    const [myProfile, setMyProfile] = useState(null);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('All');
 
@@ -77,6 +78,24 @@ export default function CommunitiesTab({ user, onCommunityClick }) {
         fetchMyMemberships();
     }, [user]);
 
+    // Real college/interests for "Recommended For You" — user.user_metadata is
+    // Supabase Auth's own metadata, never populated by this app's real profile
+    // flow (confirmed live: it's empty even for accounts with real college/
+    // interests set). The real data lives in profiles.college/profiles.interests,
+    // same columns used everywhere else in the app (Dashboard.jsx's recommended-
+    // users sort, ConnectPeersTab.jsx's "People You May Know" logic).
+    useEffect(() => {
+        if (!user) { setMyProfile(null); return; }
+        let cancelled = false;
+        supabase.from('profiles').select('college, interests').eq('id', user.id).maybeSingle()
+            .then(({ data, error }) => {
+                if (cancelled) return;
+                if (error) { console.error('Error fetching profile for recommendations:', error); return; }
+                setMyProfile(data);
+            });
+        return () => { cancelled = true; };
+    }, [user]);
+
     const categories = ['All', 'Technology', 'Design', 'Marketing', 'Business', 'Programming', 'AI', 'Sports', 'Startup'];
     
     const filteredCommunities = communities.filter(c => 
@@ -98,9 +117,10 @@ export default function CommunitiesTab({ user, onCommunityClick }) {
     // 3. Location-Based
     const locationBased = discoverable.filter(c => c.location);
 
-    // 4. Recommended For You: match college or interests
-    const userCollege = user?.user_metadata?.college?.toLowerCase() || '';
-    const userInterests = user?.user_metadata?.interests || [];
+    // 4. Recommended For You: match college or interests — real profiles columns,
+    // not user_metadata (see the fetchMyProfile effect above for why).
+    const userCollege = myProfile?.college?.toLowerCase() || '';
+    const userInterests = myProfile?.interests || [];
     
     const recommended = discoverable.filter(c => {
         const cDesc = (c.description || '').toLowerCase();
@@ -153,6 +173,21 @@ export default function CommunitiesTab({ user, onCommunityClick }) {
                 ))}
             </div>
 
+            {/* Recommended For You — moved ahead of My Communities to match the
+                reference's section order (Network-tab.png). */}
+            {user && recommended.length > 0 && (
+                <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>Recommended For You</h2>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.25rem' }}>
+                        {recommended.map(c => (
+                            <CommunityCard key={c.id} community={c} user={user} onClick={() => onCommunityClick(c)} isLive={true} isJoined={false} />
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {/* My Communities */}
             {user && myComms.length > 0 && (
                 <div>
@@ -162,20 +197,6 @@ export default function CommunitiesTab({ user, onCommunityClick }) {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.25rem' }}>
                         {myComms.map(c => (
                             <CommunityCard key={c.id} community={c} user={user} onClick={() => onCommunityClick(c)} isLive={true} isJoined={true} />
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Recommended For You */}
-            {user && recommended.length > 0 && (
-                <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                        <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>Recommended For You</h2>
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.25rem' }}>
-                        {recommended.map(c => (
-                            <CommunityCard key={c.id} community={c} user={user} onClick={() => onCommunityClick(c)} isLive={true} isJoined={false} />
                         ))}
                     </div>
                 </div>

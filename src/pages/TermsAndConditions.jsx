@@ -1,26 +1,10 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar.jsx';
 import Footer from '../components/Footer.jsx';
+import SEO from '../components/SEO.jsx';
 
 export default function TermsAndConditions() {
-    useEffect(() => {
-        const originalTitle = document.title;
-        const metaDesc = document.querySelector('meta[name="description"]');
-        const originalDesc = metaDesc ? metaDesc.getAttribute('content') : '';
-
-        document.title = "Terms and Conditions | Chavee — India's Student Social Platform";
-        if (metaDesc) {
-            metaDesc.setAttribute('content', "Read Chavee's Terms and Conditions covering account use, content guidelines, gigs and payments, intellectual property, and user responsibilities.");
-        }
-
-        return () => {
-            document.title = originalTitle;
-            if (metaDesc) {
-                metaDesc.setAttribute('content', originalDesc);
-            }
-        };
-    }, []);
 
     const S = {
         wrapper: {
@@ -133,6 +117,11 @@ export default function TermsAndConditions() {
 
     return (
         <div style={S.wrapper}>
+            <SEO
+                title="Terms and Conditions | Chavee — India's Student Social Platform"
+                description="Read Chavee's Terms and Conditions covering account use, content guidelines, gigs and payments, intellectual property, and user responsibilities."
+                path="/terms-and-conditions"
+            />
             <Navbar />
 
             {/* Hero */}
@@ -301,8 +290,8 @@ export default function TermsAndConditions() {
                     </p>
                     <p style={S.p}>
                         <span style={S.strong}>Chavee</span><br />
-                        Adimaparambil House, Ponmundam PO, Ponmundam<br />
-                        Tirur, Kerala 676106, India<br />
+                        2nd Floor, West End Tower, T. P. Road, Calicut<br />
+                        Kerala - 673004, India<br />
                         Email: <a href="mailto:info@chavee.in" style={S.link}>info@chavee.in</a>
                     </p>
 

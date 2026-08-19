@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { Turnstile } from '@marsidev/react-turnstile';
 import { ChaveeLogo } from '../Logo.jsx';
-import { supabase } from '../supabaseClient.js';
 
 const FOOTER_LINKS = {
     Platform: [
@@ -39,21 +39,47 @@ export default function Footer() {
     const year = new Date().getFullYear();
     const [email, setEmail] = useState('');
     const [status, setStatus] = useState('idle');
+    const [errorMsg, setErrorMsg] = useState('');
+
+    // Turnstile — verified server-side inside the brevo-subscribe Edge
+    // Function (which now does both the notify_subscribers insert and the
+    // real Brevo contact push), not client-side. The direct anonymous
+    // INSERT policies on notify_subscribers were revoked in favor of that
+    // function being the only write path.
+    const [captchaToken, setCaptchaToken] = useState('');
+    const turnstileRef = useRef(null);
 
     const handleSubscribe = async (e) => {
         e.preventDefault();
         if (!email) return;
+        if (!captchaToken) {
+            setErrorMsg('Please complete the verification challenge.');
+            setStatus('error');
+            setTimeout(() => setStatus('idle'), 3000);
+            return;
+        }
         setStatus('loading');
         try {
-            const { error } = await supabase.from('notify_subscribers').insert([{ email }]);
-            if (error && error.code !== '23505') throw error;
+            const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+            const response = await fetch(`${supabaseUrl}/functions/v1/brevo-subscribe`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, turnstileToken: captchaToken }),
+            });
+            const json = await response.json();
+            if (!response.ok) throw new Error(json.error || 'Something went wrong.');
+
             setStatus('success');
             setEmail('');
             setTimeout(() => setStatus('idle'), 3000);
         } catch (err) {
             console.error('Subscription error:', err);
+            setErrorMsg(err.message || 'Something went wrong. Try again.');
             setStatus('error');
             setTimeout(() => setStatus('idle'), 3000);
+        } finally {
+            turnstileRef.current?.reset();
+            setCaptchaToken('');
         }
     };
 
@@ -74,7 +100,7 @@ export default function Footer() {
                     borderBottom: '1px solid #E5E7EB',
                 }}>
                     {/* Brand column */}
-                    <div style={{ gridColumn: '1 / -1', maxWidth: 320, '@media (min-width: 1024px)': { gridColumn: 'span 2' } }}>
+                    <div className="footer-brand-col" style={{ gridColumn: '1 / -1', maxWidth: 320 }}>
                         <ChaveeLogo height={36} />
                         <p style={{ marginTop: '1.25rem', fontSize: '0.9rem', color: '#6B7280', lineHeight: 1.6 }}>
                             India's first student social platform. Learn, earn, and build meaningful connections.
@@ -144,7 +170,7 @@ export default function Footer() {
                     ))}
 
                     {/* Newsletter */}
-                    <div style={{ gridColumn: '1 / -1', '@media (min-width: 768px)': { gridColumn: 'span 2' } }}>
+                    <div className="footer-newsletter-col" style={{ gridColumn: '1 / -1' }}>
                         <h4 style={{
                             fontSize: '0.85rem',
                             fontWeight: 700,
@@ -156,43 +182,53 @@ export default function Footer() {
                         <p style={{ fontSize: '0.85rem', color: '#6B7280', marginBottom: '1rem', lineHeight: 1.5 }}>
                             Get the latest updates on internships, events, and new features.
                         </p>
-                        <form onSubmit={handleSubscribe} style={{ display: 'flex', gap: '0.5rem' }}>
-                            <input
-                                type="email"
-                                placeholder="Enter your email"
-                                required
-                                value={email}
-                                onChange={e => setEmail(e.target.value)}
-                                style={{
-                                    flex: 1,
-                                    padding: '0.75rem 1rem',
-                                    borderRadius: '10px',
-                                    border: '1px solid #E5E7EB',
-                                    background: '#FFFFFF',
-                                    fontSize: '0.9rem',
-                                    color: '#111827',
-                                    outline: 'none',
-                                }}
+                        <form onSubmit={handleSubscribe} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <input
+                                    type="email"
+                                    placeholder="Enter your email"
+                                    required
+                                    value={email}
+                                    onChange={e => setEmail(e.target.value)}
+                                    style={{
+                                        flex: 1,
+                                        padding: '0.75rem 1rem',
+                                        borderRadius: '10px',
+                                        border: '1px solid #E5E7EB',
+                                        background: '#FFFFFF',
+                                        fontSize: '0.9rem',
+                                        color: '#111827',
+                                        outline: 'none',
+                                    }}
+                                />
+                                <button
+                                    type="submit"
+                                    disabled={status === 'loading' || status === 'success' || !captchaToken}
+                                    style={{
+                                        padding: '0 1.25rem',
+                                        borderRadius: '10px',
+                                        background: status === 'success' ? '#10B981' : '#0B8F5A',
+                                        color: '#FFFFFF',
+                                        border: 'none',
+                                        fontWeight: 600,
+                                        cursor: (status === 'loading' || status === 'success' || !captchaToken) ? 'not-allowed' : 'pointer',
+                                        opacity: !captchaToken && status === 'idle' ? 0.7 : 1,
+                                        transition: 'background 0.2s',
+                                        fontSize: '0.9rem'
+                                    }}
+                                >
+                                    {status === 'loading' ? '...' : status === 'success' ? '✓' : 'Subscribe'}
+                                </button>
+                            </div>
+                            <Turnstile
+                                ref={turnstileRef}
+                                siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                                onSuccess={setCaptchaToken}
+                                onExpire={() => setCaptchaToken('')}
+                                onError={() => setCaptchaToken('')}
                             />
-                            <button
-                                type="submit"
-                                disabled={status === 'loading' || status === 'success'}
-                                style={{
-                                    padding: '0 1.25rem',
-                                    borderRadius: '10px',
-                                    background: status === 'success' ? '#10B981' : '#0B8F5A',
-                                    color: '#FFFFFF',
-                                    border: 'none',
-                                    fontWeight: 600,
-                                    cursor: status === 'loading' || status === 'success' ? 'not-allowed' : 'pointer',
-                                    transition: 'background 0.2s',
-                                    fontSize: '0.9rem'
-                                }}
-                            >
-                                {status === 'loading' ? '...' : status === 'success' ? '✓' : 'Subscribe'}
-                            </button>
                         </form>
-                        {status === 'error' && <p style={{ color: '#EF4444', fontSize: '0.75rem', marginTop: '0.5rem' }}>Something went wrong. Try again.</p>}
+                        {status === 'error' && <p style={{ color: '#EF4444', fontSize: '0.75rem', marginTop: '0.5rem' }}>{errorMsg || 'Something went wrong. Try again.'}</p>}
                     </div>
                 </div>
 
@@ -211,6 +247,7 @@ export default function Footer() {
                         <Link to="/privacy-policy" style={{ color: '#6B7280', textDecoration: 'none' }} onMouseEnter={e => e.target.style.color = '#0B8F5A'} onMouseLeave={e => e.target.style.color = '#6B7280'}>Privacy Policy</Link>
                         <Link to="/terms-and-conditions" style={{ color: '#6B7280', textDecoration: 'none' }} onMouseEnter={e => e.target.style.color = '#0B8F5A'} onMouseLeave={e => e.target.style.color = '#6B7280'}>Terms</Link>
                         <Link to="/refund-and-cancellation" style={{ color: '#6B7280', textDecoration: 'none' }} onMouseEnter={e => e.target.style.color = '#0B8F5A'} onMouseLeave={e => e.target.style.color = '#6B7280'}>Refund Policy</Link>
+                        <Link to="/shipping-and-delivery" style={{ color: '#6B7280', textDecoration: 'none' }} onMouseEnter={e => e.target.style.color = '#0B8F5A'} onMouseLeave={e => e.target.style.color = '#6B7280'}>Shipping Policy</Link>
                     </div>
                 </div>
             </div>

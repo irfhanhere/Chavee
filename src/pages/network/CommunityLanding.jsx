@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient.js';
 import Toast, { useToast } from '../../components/Toast.jsx';
 import { ButtonSpinner } from '../../components/Spinner.jsx';
@@ -194,18 +195,17 @@ export default function CommunityLanding({ community, user, onBack }) {
                     {activeTab === 'Events' && <EventsTab community={community} user={user} role={role} showToast={showToast} />}
                     {activeTab === 'About' && <AboutTab community={community} />}
                 </div>
-
-                {/* Right Rail (Desktop) */}
-                <div style={{ width: 300, display: 'none', flexShrink: 0 }} className="desktop-rail">
-                    <RightRail community={community} />
-                </div>
+                {/* Right Rail removed — was 100% hardcoded fake data (a static
+                    "Rahul Kumar ✓ Admin" / "Arjun Pillai 1,250 XP" shown
+                    identically on every community, confirmed via investigation).
+                    No replacement per the confirmed decision: channel-level
+                    admin/deletion already covers the real "who moderates what"
+                    need. A real query (community_members filtered to
+                    role IN ('admin','moderator')) is documented in this
+                    session's history if promotions ever start happening —
+                    currently all real community_members rows are role:'member',
+                    so it would render empty on every real community today. */}
             </div>
-
-            <style>{`
-                @media (min-width: 1024px) {
-                    .desktop-rail { display: block !important; }
-                }
-            `}</style>
         </div>
     );
 }
@@ -534,6 +534,21 @@ function DiscussionsTab({ community, user, role, showToast }) {
     const [formData, setFormData] = React.useState({ name: '', description: '', rules: '', is_event_channel: false, event_deadline: '' });
     const [saving, setSaving] = React.useState(false);
 
+    // Real per-channel message counts — same batched query (one call across
+    // all this community's channel conversation_ids) already used in the
+    // admin Channels tab. Reframed as "X messages", not "X unread" — no
+    // per-reader read-tracking exists (messages.is_read/read_at are single
+    // flags on the row itself, not scoped to a specific reader), so a true
+    // unread count can't be built for a multi-member channel without new
+    // schema. This is the honest real substitute.
+    const [messageCounts, setMessageCounts] = React.useState({});
+    // Real "Top Discussions" — posts for this community, ranked by real
+    // like+comment counts (same tables Dashboard.jsx's feed already
+    // aggregates). No "in #Channel" tag — no column links a post to a
+    // specific channel, not faked.
+    const [topDiscussions, setTopDiscussions] = React.useState([]);
+    const [loadingTopDiscussions, setLoadingTopDiscussions] = React.useState(true);
+
     // Which channel is currently open (in-file view state, not a new route — see report)
     const [selectedChannel, setSelectedChannel] = React.useState(null);
     const [openingChannelId, setOpeningChannelId] = React.useState(null);
@@ -557,6 +572,34 @@ function DiscussionsTab({ community, user, role, showToast }) {
         };
         fetchAdmins();
     }, []);
+
+    React.useEffect(() => {
+        const loadTopDiscussions = async () => {
+            setLoadingTopDiscussions(true);
+            try {
+                // Same real embedded-select pattern Dashboard.jsx's feed already
+                // uses (post_likes(user_id), post_comments(id)) — ranked by
+                // like+comment count, no separate aggregation query needed.
+                const { data, error } = await supabase
+                    .from('posts')
+                    .select('id, content, created_at, profiles(full_name, avatar_url), post_likes(user_id), post_comments(id)')
+                    .eq('community_id', community.id)
+                    .order('created_at', { ascending: false })
+                    .limit(20);
+                if (error) throw error;
+                const ranked = (data || [])
+                    .map(p => ({ ...p, likeCount: p.post_likes?.length || 0, commentCount: p.post_comments?.length || 0 }))
+                    .sort((a, b) => (b.likeCount + b.commentCount) - (a.likeCount + a.commentCount))
+                    .slice(0, 3);
+                setTopDiscussions(ranked);
+            } catch (err) {
+                console.error('Failed to load top discussions:', err);
+            } finally {
+                setLoadingTopDiscussions(false);
+            }
+        };
+        loadTopDiscussions();
+    }, [community.id]);
 
     const loadChannels = async () => {
         try {
@@ -588,6 +631,19 @@ function DiscussionsTab({ community, user, role, showToast }) {
             });
 
             setChannels(active);
+
+            // Real per-channel message counts — one batched query across all
+            // this community's channel conversation_ids, same as the admin
+            // Channels tab.
+            const convIds = active.map(c => c.conversation_id).filter(Boolean);
+            if (convIds.length) {
+                const { data: msgRows } = await supabase.from('messages').select('conversation_id').in('conversation_id', convIds);
+                const counts = {};
+                (msgRows || []).forEach(m => { counts[m.conversation_id] = (counts[m.conversation_id] || 0) + 1; });
+                setMessageCounts(counts);
+            } else {
+                setMessageCounts({});
+            }
         } catch (err) {
             console.error('Error loading channels:', err);
         } finally {
@@ -805,9 +861,47 @@ function DiscussionsTab({ community, user, role, showToast }) {
                                     ⏳ Ends {new Date(channel.event_deadline).toLocaleString()}
                                 </span>
                             )}
+                            {/* Real message count, not "unread" — see the messageCounts
+                                comment above for why a true unread count isn't buildable
+                                without new schema. */}
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                                💬 {messageCounts[channel.conversation_id] || 0} message{(messageCounts[channel.conversation_id] || 0) === 1 ? '' : 's'}
+                            </span>
                         </div>
                         );
                     })}
+                </div>
+            )}
+
+            {/* Top Discussions — real posts for this community, ranked by real
+                like+comment engagement. No "in #Channel" tag (no real column
+                links a post to a channel). */}
+            {!loading && (
+                <div style={{ marginTop: '2rem' }}>
+                    <h3 style={{ margin: '0 0 1rem', fontSize: '1.1rem', fontWeight: 800 }}>Top Discussions</h3>
+                    {loadingTopDiscussions ? (
+                        <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Loading...</div>
+                    ) : topDiscussions.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '2rem', background: 'var(--bg-surface)', border: '1px dashed var(--border-color)', borderRadius: 16, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                            No posts in this community yet.
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {topDiscussions.map(p => (
+                                <div key={p.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <span style={{ fontWeight: 800, fontSize: '0.9rem' }}>{p.profiles?.full_name || 'Unknown'}</span>
+                                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{new Date(p.created_at).toLocaleDateString()}</span>
+                                    </div>
+                                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{p.content}</p>
+                                    <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                                        <span>🤍 {p.likeCount}</span>
+                                        <span>💬 {p.commentCount}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -892,24 +986,22 @@ function ChannelDetailView({ channel, user, showToast, onBack }) {
         if (!content.trim() || sending) return;
         setSending(true);
         try {
-            // Exact proven shape from Messages.jsx's handleSend — no extra fields, matching
-            // the real messages table (id, conversation_id, sender_id, content, file_url, created_at).
-            // No .select('*, profiles(...)') here either — same FK gap as loadMessages, so we
-            // just reload the feed afterward (same pattern HomeTab's handlePost already uses).
-            const { error } = await supabase
-                .from('messages')
-                .insert({
-                    conversation_id: conversationId,
-                    sender_id: user.id,
-                    content: content.trim(),
-                    file_url: null
-                });
+            // Found this was still a separate raw insert, never migrated when
+            // Messages.jsx's handleSend moved to the real send_message RPC — fixed
+            // to match. Channel/group conversations skip the RPC's connection gate
+            // entirely (real server-side check, not client logic), so this should
+            // behave identically to before for real channel messages; the only
+            // actual change is going through the same enforced path as DMs.
+            const { error } = await supabase.rpc('send_message', {
+                p_conversation_id: conversationId,
+                p_content: content.trim(),
+            });
             if (error) throw error;
 
             setContent('');
             loadMessages();
         } catch (err) {
-            if (showToast) showToast('Failed to send message: ' + err.message, 'error');
+            if (showToast) showToast(err.message || 'Failed to send message.', 'error');
         } finally {
             setSending(false);
         }
@@ -1104,114 +1196,56 @@ function MembersTab({ community }) {
     );
 }
 
-function ResourcesTab({ community, role, showToast }) {
-    return (
-        <div style={{ textAlign: 'center', padding: '4rem 2rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16 }}>
-            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📚</div>
-            <h3 style={{ margin: '0 0 0.5rem', fontWeight: 800, fontSize: '1.25rem' }}>Resources Coming Soon</h3>
-            <p style={{ margin: 0, color: 'var(--text-muted)', maxWidth: 400, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.5 }}>
-                We're building a centralized hub for community documents, links, and files. Check back later!
-            </p>
-        </div>
-    );
-
-    // Original implementation preserved below for MVP phase-out
-    /*
+// Read-only for this pass — real community_resources data, no upload UI.
+// The old commented-out version of this tab (now removed) referenced a
+// `type` column that never existed (confirmed live: 42703) — real column
+// is `resource_type`. Member-upload is a separate follow-up pending an
+// RLS check (the only confirmed real write path today is the admin
+// panel's ResourcesTab in CommunitiesManager.jsx).
+function ResourcesTab({ community }) {
     const [resources, setResources] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
-    const [showUpload, setShowUpload] = React.useState(false);
-    const [formData, setFormData] = React.useState({ title: '', url: '', type: 'Document' });
-    const [saving, setSaving] = React.useState(false);
 
     React.useEffect(() => {
+        const loadResources = async () => {
+            setLoading(true);
+            try {
+                const { data, error } = await supabase
+                    .from('community_resources')
+                    .select('*')
+                    .eq('community_id', community.id)
+                    .order('created_at', { ascending: false });
+                if (error) throw error;
+                setResources(data || []);
+            } catch (err) {
+                console.error('Failed to load resources:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
         loadResources();
     }, [community.id]);
 
-    const loadResources = async () => {
-        setLoading(true);
-        try {
-            const { data, error } = await supabase
-                .from('community_resources')
-                .select('*')
-                .eq('community_id', community.id)
-                .order('created_at', { ascending: false });
-            if (error) throw error;
-            setResources(data || []);
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleUpload = async (e) => {
-        e.preventDefault();
-        setSaving(true);
-        try {
-            const { error } = await supabase
-                .from('community_resources')
-                .insert({
-                    community_id: community.id,
-                    title: formData.title,
-                    url: formData.url,
-                    type: formData.type
-                });
-            if (error) throw error;
-            if (showToast) showToast('Resource added successfully!', 'success');
-            setShowUpload(false);
-            setFormData({ title: '', url: '', type: 'Document' });
-            loadResources();
-        } catch (err) {
-            if (showToast) showToast('Failed to add resource', 'error');
-        } finally {
-            setSaving(false);
-        }
-    };
-
     return (
         <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '1.25rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1rem' }}>Community Resources</h3>
-                {role !== 'Guest' && (
-                    <button onClick={() => setShowUpload(!showUpload)} style={{ padding: '0.4rem 0.8rem', borderRadius: 8, background: 'var(--peacock-green)', color: '#fff', border: 'none', fontWeight: 700, fontSize: '0.75rem', cursor: 'pointer' }}>
-                        {showUpload ? 'Cancel' : '+ Add Resource'}
-                    </button>
-                )}
-            </div>
-
-            {showUpload && (
-                <div style={{ background: 'var(--bg-elevated)', padding: '1rem', borderRadius: 12, marginBottom: '1rem', border: '1px solid var(--border-color)' }}>
-                    <form onSubmit={handleUpload} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        <input required placeholder="Resource Title" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }} />
-                        <input required type="url" placeholder="URL Link" value={formData.url} onChange={e => setFormData({...formData, url: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }} />
-                        <select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}>
-                            <option>Document</option>
-                            <option>Video</option>
-                            <option>Link</option>
-                        </select>
-                        <button type="submit" disabled={saving} style={{ padding: '0.5rem', background: 'var(--peacock-green)', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
-                            {saving ? 'Saving...' : 'Save Resource'}
-                        </button>
-                    </form>
-                </div>
-            )}
+            <h3 style={{ margin: '0 0 1rem', fontWeight: 800, fontSize: '1rem' }}>Community Resources</h3>
 
             {loading ? (
                 <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading resources...</div>
             ) : resources.length === 0 ? (
                 <div style={{ padding: '2rem', textAlign: 'center', background: 'var(--bg-elevated)', borderRadius: 12, border: '1px dashed var(--border-color)' }}>
-                    <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>No resources uploaded yet.</p>
+                    <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>No resources shared yet.</p>
                 </div>
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                     {resources.map(r => (
                         <a key={r.id} href={r.url} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem', background: 'var(--bg-elevated)', borderRadius: 12, border: '1px solid var(--border-color)', textDecoration: 'none', color: 'inherit' }}>
                             <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(16,185,129,0.1)', color: '#10B981', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>
-                                {r.type === 'Video' ? '🎬' : r.type === 'Document' ? '📄' : '🔗'}
+                                {r.resource_type === 'Video' ? '🎬' : r.resource_type === 'Document' ? '📄' : '🔗'}
                             </div>
                             <div>
                                 <h4 style={{ margin: '0 0 0.2rem', fontWeight: 700, fontSize: '0.95rem' }}>{r.title}</h4>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{r.type}</span>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{r.resource_type}</span>
                             </div>
                         </a>
                     ))}
@@ -1219,137 +1253,89 @@ function ResourcesTab({ community, role, showToast }) {
             )}
         </div>
     );
-    */
 }
 
-function EventsTab({ community, user, role, showToast }) {
-    return (
-        <div style={{ textAlign: 'center', padding: '4rem 2rem', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16 }}>
-            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📅</div>
-            <h3 style={{ margin: '0 0 0.5rem', fontWeight: 800, fontSize: '1.25rem' }}>Events Coming Soon</h3>
-            <p style={{ margin: 0, color: 'var(--text-muted)', maxWidth: 400, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.5 }}>
-                We're redesigning community events. This feature will be back once it's ready.
-            </p>
-        </div>
-    );
-
-    // Original implementation preserved below for MVP phase-out
-    /*
+// Real, community-scoped events — now possible since CreateEventWizard.jsx
+// gained a real "Attach to a Community" field (writes events.community_id).
+// Read-only here, same as Resources: the old commented version's create
+// form wrote status: 'upcoming', which was never a real status value
+// (real values are coming_soon/live/completed/cancelled, confirmed live)
+// — not resurrected. No member-facing event creation exists anywhere in
+// the app (confirmed in the Part E investigation, admin-only via the real
+// wizard), so "Create Event" isn't built here either rather than link to
+// nothing real.
+function EventsTab({ community }) {
+    const navigate = useNavigate();
     const [events, setEvents] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
-    const [showCreate, setShowCreate] = React.useState(false);
-    const [formData, setFormData] = React.useState({ title: '', event_date: '', location: '', description: '', meeting_link: '', category: '' });
-    const [saving, setSaving] = React.useState(false);
 
     React.useEffect(() => {
+        const loadEvents = async () => {
+            setLoading(true);
+            try {
+                const { data, error } = await supabase
+                    .from('events')
+                    .select('*')
+                    .eq('community_id', community.id)
+                    .order('event_date', { ascending: true });
+                if (error) throw error;
+                setEvents(data || []);
+            } catch (err) {
+                console.error('Failed to load community events:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
         loadEvents();
     }, [community.id]);
 
-    const loadEvents = async () => {
-        setLoading(true);
-        try {
-            const { data, error } = await supabase
-                .from('events')
-                .select('*')
-                .eq('community_id', community.id)
-                .order('event_date', { ascending: true });
-            if (error) throw error;
-            setEvents(data || []);
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const now = new Date();
+    const upcoming = events.filter(e => new Date(e.event_date) >= now && e.status !== 'completed' && e.status !== 'cancelled');
+    const past = events.filter(e => new Date(e.event_date) < now || e.status === 'completed');
 
-    const handleCreate = async (e) => {
-        e.preventDefault();
-        setSaving(true);
-        try {
-            const { error } = await supabase
-                .from('events')
-                .insert({
-                    community_id: community.id,
-                    organizer_id: user.id,
-                    title: formData.title,
-                    category: formData.category.trim() || 'General',
-                    event_date: formData.event_date,
-                    location: formData.location,
-                    description: formData.description,
-                    meeting_link: formData.meeting_link,
-                    status: 'upcoming'
-                });
-            if (error) throw error;
-            if (showToast) showToast('Event created successfully!', 'success');
-            setShowCreate(false);
-            setFormData({ title: '', event_date: '', location: '', description: '', meeting_link: '', category: '' });
-            loadEvents();
-        } catch (err) {
-            if (showToast) showToast('Failed to create event', 'error');
-        } finally {
-            setSaving(false);
-        }
-    };
+    const EventRow = ({ e }) => (
+        <div
+            onClick={() => navigate(`/events/${e.slug || e.id}`)}
+            role="button"
+            tabIndex={0}
+            style={{ display: 'block', padding: '1.25rem', background: 'var(--bg-elevated)', borderRadius: 12, border: '1px solid var(--border-color)', cursor: 'pointer' }}
+        >
+            <h4 style={{ margin: '0 0 0.5rem', fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary)' }}>{e.title}</h4>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.85rem', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>📅 {new Date(e.event_date).toLocaleString()}</span>
+                {e.location && <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>📍 {e.location}</span>}
+            </div>
+            {e.description && <p style={{ margin: '0.75rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{e.description}</p>}
+        </div>
+    );
 
     return (
-        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '1.25rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h3 style={{ margin: 0, fontWeight: 800, fontSize: '1rem' }}>Upcoming Events</h3>
-                {role !== 'Guest' && (
-                    <button onClick={() => setShowCreate(!showCreate)} style={{ padding: '0.4rem 0.8rem', borderRadius: 8, background: 'var(--peacock-green)', color: '#fff', border: 'none', fontWeight: 700, fontSize: '0.75rem', cursor: 'pointer' }}>
-                        {showCreate ? 'Cancel' : '+ Create Event'}
-                    </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '1.25rem' }}>
+                <h3 style={{ margin: '0 0 1rem', fontWeight: 800, fontSize: '1rem' }}>Upcoming Events</h3>
+                {loading ? (
+                    <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading events...</div>
+                ) : upcoming.length === 0 ? (
+                    <div style={{ padding: '2rem', textAlign: 'center', background: 'var(--bg-elevated)', borderRadius: 12, border: '1px dashed var(--border-color)' }}>
+                        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>No upcoming events scheduled.</p>
+                    </div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        {upcoming.map(e => <EventRow key={e.id} e={e} />)}
+                    </div>
                 )}
             </div>
 
-            {showCreate && (
-                <div style={{ background: 'var(--bg-elevated)', padding: '1rem', borderRadius: 12, marginBottom: '1rem', border: '1px solid var(--border-color)' }}>
-                    <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        <input required placeholder="Event Title" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }} />
-                        <input placeholder="Event Type (e.g. Live Class, Meeting, Offline Meetup)" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }} />
-                        <input required type="datetime-local" value={formData.event_date} onChange={e => setFormData({...formData, event_date: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }} />
-                        <input required placeholder="Location (e.g. Zoom, New York)" value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }} />
-                        <input placeholder="Event Link (optional)" type="url" value={formData.meeting_link} onChange={e => setFormData({...formData, meeting_link: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }} />
-                        <textarea required placeholder="Description" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }} rows={3} />
-                        <button type="submit" disabled={saving} style={{ padding: '0.5rem', background: 'var(--peacock-green)', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
-                            {saving ? 'Saving...' : 'Create Event'}
-                        </button>
-                    </form>
-                </div>
-            )}
-
-            {loading ? (
-                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading events...</div>
-            ) : events.length === 0 ? (
-                <div style={{ padding: '2rem', textAlign: 'center', background: 'var(--bg-elevated)', borderRadius: 12, border: '1px dashed var(--border-color)' }}>
-                    <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>No upcoming events scheduled.</p>
-                </div>
-            ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    {events.map(e => (
-                        <div key={e.id} style={{ padding: '1.25rem', background: 'var(--bg-elevated)', borderRadius: 12, border: '1px solid var(--border-color)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                <div>
-                                    <h4 style={{ margin: '0 0 0.5rem', fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary)' }}>{e.title}</h4>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>📅 {new Date(e.event_date).toLocaleString()}</span>
-                                        {e.location && <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>📍 {e.location}</span>}
-                                    </div>
-                                </div>
-                            </div>
-                            {e.description && <p style={{ margin: '1rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>{e.description}</p>}
-                            {e.meeting_link && (
-                                <a href={e.meeting_link} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '1rem', padding: '0.4rem 1rem', background: 'var(--peacock-green)', color: '#fff', borderRadius: 8, textDecoration: 'none', fontWeight: 700, fontSize: '0.8rem' }}>
-                                    Join Event
-                                </a>
-                            )}
-                        </div>
-                    ))}
+            {!loading && past.length > 0 && (
+                <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '1.25rem' }}>
+                    <h3 style={{ margin: '0 0 1rem', fontWeight: 800, fontSize: '1rem' }}>Past Events</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        {past.map(e => <EventRow key={e.id} e={e} />)}
+                    </div>
                 </div>
             )}
         </div>
     );
-    */
 }
 
 function AboutTab({ community }) {
@@ -1376,46 +1362,19 @@ function AboutTab({ community }) {
             <div style={{ display: 'flex', gap: '2rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
                 <div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.2rem' }}>Created On</div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>15 Jan 2024</div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{new Date(community.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
                 </div>
-                <div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.2rem' }}>Location</div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Global</div>
-                </div>
+                {/* communities.location is real but often null — shown only when
+                    present. A "Global" fallback would be a false claim nobody
+                    actually made about this community. */}
+                {community.location && (
+                    <div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.2rem' }}>Location</div>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{community.location}</div>
+                    </div>
+                )}
             </div>
         </div>
     );
 }
 
-function RightRail({ community }) {
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {/* Admins */}
-            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '1.25rem' }}>
-                <h3 style={{ margin: '0 0 1rem', fontWeight: 800, fontSize: '0.95rem' }}>Admins</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--gradient-brand)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>R</div>
-                        <div>
-                            <div style={{ fontSize: '0.85rem', fontWeight: 700 }}>Rahul Kumar ✓</div>
-                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Admin</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            {/* Top Contributors */}
-            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '1.25rem' }}>
-                <h3 style={{ margin: '0 0 1rem', fontWeight: 800, fontSize: '0.95rem' }}>Top Contributors <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', fontWeight: 600 }}>(This Month)</span></h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700 }}>A</div>
-                            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Arjun Pillai</span>
-                        </div>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-gold)' }}>1,250 XP 👑</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}

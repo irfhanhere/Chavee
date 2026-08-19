@@ -1,27 +1,10 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar.jsx';
 import Footer from '../components/Footer.jsx';
+import SEO from '../components/SEO.jsx';
 
 export default function PrivacyPolicy() {
-    useEffect(() => {
-        const originalTitle = document.title;
-        const metaDesc = document.querySelector('meta[name="description"]');
-        const originalDesc = metaDesc ? metaDesc.getAttribute('content') : '';
-
-        document.title = "Privacy Policy | Chavee — India's Student Social Platform";
-        if (metaDesc) {
-            metaDesc.setAttribute('content', "Read Chavee's Privacy Policy to understand how we collect, use, store, and protect your personal data as a student user of our platform.");
-        }
-
-        return () => {
-            document.title = originalTitle;
-            if (metaDesc) {
-                metaDesc.setAttribute('content', originalDesc);
-            }
-        };
-    }, []);
-
     const S = {
         wrapper: {
             background: 'var(--bg-base)',
@@ -133,6 +116,11 @@ export default function PrivacyPolicy() {
 
     return (
         <div style={S.wrapper}>
+            <SEO
+                title="Privacy Policy | Chavee — India's Student Social Platform"
+                description="Read Chavee's Privacy Policy to understand how we collect, use, store, and protect your personal data as a student user of our platform."
+                path="/privacy-policy"
+            />
             <Navbar />
 
             {/* Hero */}
@@ -159,7 +147,7 @@ export default function PrivacyPolicy() {
 
                     <h2 style={{ ...S.h2, marginTop: 0 }}>1. Introduction</h2>
                     <p style={S.p}>
-                        Chavee ("we," "us," "our," or "the Platform") is operated by Chavee, based at Adimaparambil House, Ponmundam PO, Ponmundam, Tirur, Kerala 676106, India. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit or use chavee.in and any associated mobile applications (collectively, the "Services").
+                        Chavee ("we," "us," "our," or "the Platform") is operated by Chavee, based at 2nd Floor, West End Tower, T. P. Road, Calicut, Kerala - 673004, India. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit or use chavee.in and any associated mobile applications (collectively, the "Services").
                     </p>
                     <p style={S.p}>
                         By creating an account or otherwise using Chavee, you agree to the terms of this Privacy Policy. If you do not agree with any part of this policy, please do not use our Services.
@@ -293,8 +281,8 @@ export default function PrivacyPolicy() {
                     </p>
                     <p style={S.p}>
                         <span style={S.strong}>Chavee</span><br />
-                        Adimaparambil House, Ponmundam PO, Ponmundam<br />
-                        Tirur, Kerala 676106, India<br />
+                        2nd Floor, West End Tower, T. P. Road, Calicut<br />
+                        Kerala - 673004, India<br />
                         Email: <a href="mailto:info@chavee.in" style={S.link}>info@chavee.in</a>
                     </p>
 

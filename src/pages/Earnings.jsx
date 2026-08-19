@@ -3,70 +3,24 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
 import { PageLoader } from '../components/Spinner.jsx';
 import Toast, { useToast } from '../components/Toast.jsx';
+import WithdrawRequestForm from '../components/WithdrawRequestForm.jsx';
 
 const formatDate = (value) => value
     ? new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
     : '—';
 
-const WITHDRAWAL_MIN_AMOUNT = 2000;
-const WITHDRAWAL_MIN_DAYS = 7;
+const formatDateTime = (value) => value
+    ? new Date(value).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : '—';
 
-// ─────────────────────────────────────────────────────────────────────────
-// MOCK / TEMPORARY — eligibility is computed client-side from already-fetched
-// contract data using a placeholder rule (7 days since approval OR ₹2000
-// total, whichever comes first). This is NOT a source of truth for real
-// money. When real fund-holding is implemented (Chavee actually holding
-// funds instead of Cashfree settling directly to the seller), this must be
-// replaced with a server-side eligibility check against actual held/settled
-// balances — this function must never be trusted to gate a real payout.
-// ─────────────────────────────────────────────────────────────────────────
-function calculateWithdrawalEligibility(earnings) {
-    const now = new Date();
-    const totalEarned = earnings.reduce((sum, e) => sum + (Number(e.seller_net_amount) || 0), 0);
-
-    // Rule: if total approved earnings already reach the ₹2000 minimum, the whole
-    // amount is eligible immediately regardless of age.
-    if (totalEarned >= WITHDRAWAL_MIN_AMOUNT) {
-        return { eligibleAmount: totalEarned, isEligible: true, reason: null };
-    }
-
-    // Otherwise, only entries that have aged past the 7-day mark are eligible.
-    const agedEntries = earnings.filter(e => {
-        if (!e.approved_at) return false;
-        const ageMs = now - new Date(e.approved_at);
-        return ageMs >= WITHDRAWAL_MIN_DAYS * 24 * 60 * 60 * 1000;
-    });
-    const eligibleAmount = agedEntries.reduce((sum, e) => sum + (Number(e.seller_net_amount) || 0), 0);
-
-    if (eligibleAmount > 0) {
-        return { eligibleAmount, isEligible: true, reason: null };
-    }
-
-    // Nothing eligible yet — figure out which condition is closer: reaching ₹2000,
-    // or the soonest entry crossing the 7-day mark.
-    const amountShort = WITHDRAWAL_MIN_AMOUNT - totalEarned;
-
-    let daysUntilAged = null;
-    earnings.forEach(e => {
-        if (!e.approved_at) return;
-        const ageMs = now - new Date(e.approved_at);
-        const daysRemaining = Math.ceil((WITHDRAWAL_MIN_DAYS * 24 * 60 * 60 * 1000 - ageMs) / (24 * 60 * 60 * 1000));
-        if (daysRemaining > 0 && (daysUntilAged === null || daysRemaining < daysUntilAged)) {
-            daysUntilAged = daysRemaining;
-        }
-    });
-
-    let reason;
-    if (daysUntilAged !== null && totalEarned > 0) {
-        reason = `Available in ${daysUntilAged} day${daysUntilAged === 1 ? '' : 's'}`;
-    } else if (amountShort > 0) {
-        reason = `₹${amountShort.toLocaleString('en-IN')} more to reach ₹${WITHDRAWAL_MIN_AMOUNT.toLocaleString('en-IN')} minimum`;
-    } else {
-        reason = 'No earnings yet';
-    }
-
-    return { eligibleAmount: 0, isEligible: false, reason };
-}
+// Eligibility (7-day clearing wait, no minimum amount) is now enforced
+// entirely server-side by the create_withdrawal_request RPC — nothing
+// client-side computes or gates it. See WithdrawRequestForm.jsx.
+const WITHDRAWAL_STATUS_STYLES = {
+    requested: { background: 'rgba(245,158,11,0.1)', color: '#B45309', border: 'rgba(245,158,11,0.25)', label: 'Requested' },
+    paid: { background: 'rgba(16,185,129,0.1)', color: 'var(--peacock-green)', border: 'rgba(16,185,129,0.25)', label: 'Paid' },
+};
+const withdrawalStatusStyle = (status) => WITHDRAWAL_STATUS_STYLES[status] || { background: 'rgba(148,163,184,0.12)', color: 'var(--text-muted)', border: 'var(--border-color)', label: status || 'Unknown' };
 
 export default function Earnings() {
     const navigate = useNavigate();
@@ -74,6 +28,8 @@ export default function Earnings() {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [earnings, setEarnings] = useState([]);
+    const [withdrawals, setWithdrawals] = useState([]);
+    const [withdrawalsLoading, setWithdrawalsLoading] = useState(true);
 
     useEffect(() => {
         const init = async () => {
@@ -141,19 +97,40 @@ export default function Earnings() {
         fetchEarnings();
     }, [user]);
 
-    // ─────────────────────────────────────────────────────────────────────
-    // MOCK / TEMPORARY — no real payout is triggered here, just a preview
-    // toast. When real fund-holding is implemented, this must call a real
-    // withdrawal-request endpoint/Edge Function instead of showing a toast.
-    // ─────────────────────────────────────────────────────────────────────
-    const handleWithdrawRequest = () => {
-        showToast("Withdrawal requests aren't live yet — this is a preview of how it'll work.", 'info');
+    const fetchWithdrawals = async () => {
+        if (!user) return;
+        setWithdrawalsLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('withdrawals')
+                .select('*')
+                .eq('seller_id', user.id)
+                .order('requested_at', { ascending: false });
+            if (error) throw error;
+            setWithdrawals(data || []);
+        } catch (err) {
+            console.error('Failed to load withdrawals', err);
+        } finally {
+            setWithdrawalsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchWithdrawals();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user]);
+
+    // Called after create_withdrawal_request succeeds — refresh the "My
+    // Withdrawals" list and let the seller know via toast, on top of the
+    // inline success message the form itself already shows.
+    const handleWithdrawSuccess = ({ amount, contractCount }) => {
+        showToast(`Withdrawal requested: ₹${amount.toLocaleString('en-IN')} across ${contractCount} gig${contractCount === 1 ? '' : 's'}`, 'success');
+        fetchWithdrawals();
     };
 
     if (loading) return <PageLoader message="Loading earnings..." />;
 
     const totalEarned = earnings.reduce((sum, e) => sum + (Number(e.seller_net_amount) || 0), 0);
-    const { eligibleAmount, isEligible, reason } = calculateWithdrawalEligibility(earnings);
 
     return (
         <div style={{ minHeight: '100vh', background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
@@ -171,42 +148,52 @@ export default function Earnings() {
                         ₹{totalEarned.toLocaleString('en-IN')}
                     </div>
                     <p style={{ margin: '0.75rem 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                        This is a record of what you've earned from completed gigs — not a spendable balance. Actual bank/UPI settlement happens on Cashfree's payout schedule, based on the payout details you've set up.
+                        This is a record of what you've earned from completed gigs — not a spendable balance. Earnings become withdrawable 7 days after approval; once you request a withdrawal, we transfer to your UPI ID manually within 24 hours.
                     </p>
                 </div>
 
-                {/* Withdraw section — MOCK / TEMPORARY, no real payout wired up yet */}
+                {/* Withdraw section — real UPI-only request, calls create_withdrawal_request RPC */}
                 <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '2rem', boxShadow: 'var(--shadow-sm)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem' }}>
-                        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800 }}>Withdraw</h3>
-                        <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#B45309', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.3)', padding: '0.15rem 0.55rem', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                            Preview — not live
-                        </span>
-                    </div>
+                    <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: 800 }}>Withdraw</h3>
                     <p style={{ margin: '0 0 1.25rem 0', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                        This is a preview of how withdrawals will work once available. Clicking the button below does not move any real money.
+                        Enter the UPI ID to send your withdrawal to. This requests everything currently eligible — earnings from gigs approved 7+ days ago — there's no minimum amount.
                     </p>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '1rem' }}>
-                        <div>
-                            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.2rem' }}>Withdrawable</div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 900, color: isEligible ? 'var(--peacock-green)' : 'var(--text-muted)' }}>
-                                ₹{eligibleAmount.toLocaleString('en-IN')}
-                            </div>
+                    <WithdrawRequestForm onSuccess={handleWithdrawSuccess} />
+                </div>
+
+                {/* My Withdrawals — real status list, not a duplicate of the Earnings summary above */}
+                <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 16, padding: '2rem', boxShadow: 'var(--shadow-sm)' }}>
+                    <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.1rem', fontWeight: 800 }}>My Withdrawals</h3>
+
+                    {withdrawalsLoading ? (
+                        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '2rem 0', fontSize: '0.9rem' }}>Loading…</div>
+                    ) : withdrawals.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {withdrawals.map(w => {
+                                const style = withdrawalStatusStyle(w.status);
+                                return (
+                                    <div key={w.id} style={{ border: '1px solid var(--border-color)', borderRadius: 12, padding: '1rem 1.1rem', background: 'var(--bg-base)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                            <span style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>₹{Number(w.amount || 0).toLocaleString('en-IN')}</span>
+                                            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: style.color, background: style.background, border: `1px solid ${style.border}`, padding: '0.15rem 0.55rem', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                                                {style.label}
+                                            </span>
+                                        </div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.15rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                            <span>Requested {formatDateTime(w.requested_at)}</span>
+                                            {w.status === 'paid' && w.paid_at && <span>Paid {formatDateTime(w.paid_at)}</span>}
+                                            {w.utr_reference && <span>UTR: {w.utr_reference}</span>}
+                                            {w.hold_reason && <span style={{ color: '#B45309' }}>On hold: {w.hold_reason}</span>}
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                            <button
-                                onClick={handleWithdrawRequest}
-                                disabled={!isEligible}
-                                className="btn-primary"
-                                style={{ padding: '0.6rem 1.25rem', borderRadius: 8, fontSize: '0.85rem', fontWeight: 700, opacity: isEligible ? 1 : 0.5, cursor: isEligible ? 'pointer' : 'not-allowed' }}
-                            >
-                                {isEligible ? `Withdraw ₹${eligibleAmount.toLocaleString('en-IN')}` : 'Withdraw'}
-                            </button>
-                            {!isEligible && reason && (
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{reason}</span>
-                            )}
+                    ) : (
+                        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '2rem 0', fontSize: '0.9rem' }}>
+                            No withdrawal requests yet.
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 {/* History */}
