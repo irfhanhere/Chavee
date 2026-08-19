@@ -18,3 +18,8 @@ local.properties
 debug.keystore
 node_modules
 dist
+.env
+.env.local
+ .env.*.local
+ node_modules/
+
