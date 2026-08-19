@@ -1,8 +1,15 @@
 import pg from 'pg';
 const { Client } = pg;
 
+// Password comes from the environment, never hardcoded. Set it in your own
+// shell before running this script, e.g.:
+//   SUPABASE_DB_PASSWORD='...' node print_schema.js
+if (!process.env.SUPABASE_DB_PASSWORD) {
+  console.error('Missing SUPABASE_DB_PASSWORD env var. Set it in your shell before running this script (do not hardcode it here).');
+  process.exit(1);
+}
 const client = new Client({
-  connectionString: 'postgresql://postgres:Apirfhan12%40@db.dtokistffdnycrzbmxcr.supabase.co:5432/postgres'
+  connectionString: `postgresql://postgres:${encodeURIComponent(process.env.SUPABASE_DB_PASSWORD)}@db.dtokistffdnycrzbmxcr.supabase.co:5432/postgres`
 });
 
 async function run() {
