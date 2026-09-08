@@ -31,6 +31,6 @@ jobs:
           server: ${{ secrets.FTP_SERVER }}
           port: ${{ secrets.FTP_PORT }}
           password: ${{ secrets.FTP_PASSWORD }}
-          local_path: './dist/*'
-          remote_path: '/public_html'
+          local_path: './dist/'
+          remote_path: '/public_html/'
           sftp_only: true
