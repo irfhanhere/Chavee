@@ -1,5 +1,4 @@
-@"
-name: Deploy Chavee to Hostinger
+﻿name: Deploy Chavee to Hostinger
 
 on:
   push:
@@ -28,11 +27,10 @@ jobs:
       - name: Deploy to Hostinger via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
-          server: `${{ secrets.FTP_SERVER }}
-          username: `${{ secrets.FTP_USERNAME }}
-          password: `${{ secrets.FTP_PASSWORD }}
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./dist/
           server-dir: ./public_html/
           exclude: |
             **/technologies/**
-"@ | Set-Content -Path ".github\workflows\deploy.yml" -Encoding utf8
