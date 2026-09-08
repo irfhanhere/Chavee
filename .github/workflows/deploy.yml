@@ -32,5 +32,5 @@ jobs:
           port: ${{ secrets.FTP_PORT }}
           password: ${{ secrets.FTP_PASSWORD }}
           local_path: './dist/'
-          remote_path: '/public_html/'
+          remote_path: 'domains/chavee.in/public_html/'
           sftp_only: true
