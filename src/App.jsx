@@ -2,6 +2,8 @@ import React, { useEffect, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import { PageLoader } from './components/Spinner.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import RequireAuth from './components/RequireAuth.jsx';
+import RequireAdmin from './components/RequireAdmin.jsx';
 
 // ── Public pages — eager, plain imports ──────────────────────────────
 // These are what a first-time visitor / search crawler / link-preview
@@ -129,6 +131,24 @@ function NotFound() {
     );
 }
 
+/**
+ * Authenticated app page: one guard, one shell, one error boundary.
+ * `allowPreview` lets a logged-out visitor with sessionStorage.previewMode
+ * see AppShell's restricted preview UI instead of being sent to /login.
+ */
+const shell = (el) => (
+    <RequireAuth allowPreview>
+        <AppShell><ErrorBoundary>{el}</ErrorBoundary></AppShell>
+    </RequireAuth>
+);
+
+/** Admin page: RequireAuth + is_admin() check, then the admin shell. */
+const adminShell = (el) => (
+    <RequireAdmin>
+        <AdminShell>{el}</AdminShell>
+    </RequireAdmin>
+);
+
 /** Privacy / Terms / Refund placeholder */
 function PlaceholderPage({ title }) {
     return (
@@ -180,56 +200,57 @@ export default function App() {
                 <Route path="/report" element={<ReportRedirect />} />
 
 
-                {/* ── Authenticated routes — share AppShell sidebar ── */}
-                <Route path="/dashboard"  element={<AppShell><ErrorBoundary><Dashboard /></ErrorBoundary></AppShell>} />
-                <Route path="/profile"    element={<AppShell><ErrorBoundary><Profile /></ErrorBoundary></AppShell>} />
+                {/* ── Authenticated routes — RequireAuth + AppShell sidebar ── */}
+                <Route path="/dashboard"  element={shell(<Dashboard />)} />
+                <Route path="/profile"    element={shell(<Profile />)} />
                 <Route path="/profile/edit" element={<Navigate to="/profile/settings/account" replace />} />
-                <Route path="/profile/settings" element={<AppShell><ErrorBoundary><SettingsLayout /></ErrorBoundary></AppShell>} />
-                <Route path="/profile/settings/:tab" element={<AppShell><ErrorBoundary><SettingsLayout /></ErrorBoundary></AppShell>} />
-                <Route path="/profile/:id" element={<AppShell><ErrorBoundary><Profile /></ErrorBoundary></AppShell>} />
-                <Route path="/saved" element={<AppShell><ErrorBoundary><SavedItems /></ErrorBoundary></AppShell>} />
-                <Route path="/earnings" element={<AppShell><ErrorBoundary><Earnings /></ErrorBoundary></AppShell>} />
-                <Route path="/notifications" element={<AppShell><ErrorBoundary><Notifications /></ErrorBoundary></AppShell>} />
-                <Route path="/help" element={<AppShell><ErrorBoundary><HelpSupport /></ErrorBoundary></AppShell>} />
-                <Route path="/messages"    element={<AppShell><ErrorBoundary><Messages /></ErrorBoundary></AppShell>} />
-                <Route path="/search"      element={<AppShell><ErrorBoundary><Search /></ErrorBoundary></AppShell>} />
+                <Route path="/profile/settings" element={shell(<SettingsLayout />)} />
+                <Route path="/profile/settings/:tab" element={shell(<SettingsLayout />)} />
+                <Route path="/profile/:id" element={shell(<Profile />)} />
+                <Route path="/saved" element={shell(<SavedItems />)} />
+                <Route path="/earnings" element={shell(<Earnings />)} />
+                <Route path="/notifications" element={shell(<Notifications />)} />
+                <Route path="/help" element={shell(<HelpSupport />)} />
+                <Route path="/messages"    element={shell(<Messages />)} />
+                <Route path="/search"      element={shell(<Search />)} />
                 <Route path="/messages/:id" element={<MessagesRedirect />} />
-                <Route path="/education"  element={<AppShell><ErrorBoundary><Learn /></ErrorBoundary></AppShell>} />
-                <Route path="/education/course/:id" element={<AppShell><ErrorBoundary><CourseDetail /></ErrorBoundary></AppShell>} />
-                <Route path="/education/:tab"  element={<AppShell><ErrorBoundary><Learn /></ErrorBoundary></AppShell>} />
+                <Route path="/education"  element={shell(<Learn />)} />
+                <Route path="/education/course/:id" element={shell(<CourseDetail />)} />
+                <Route path="/education/:tab"  element={shell(<Learn />)} />
                 <Route path="/learn"      element={<Navigate to="/education" replace />} />
-                <Route path="/earn"       element={<AppShell><ErrorBoundary><Earn /></ErrorBoundary></AppShell>} />
-                <Route path="/network"    element={<AppShell><ErrorBoundary><Network /></ErrorBoundary></AppShell>} />
-                <Route path="/network/:slug"      element={<AppShell><ErrorBoundary><Network /></ErrorBoundary></AppShell>} />
-                <Route path="/network/:slug/join" element={<AppShell><ErrorBoundary><Network /></ErrorBoundary></AppShell>} />
-                <Route path="/events"     element={<AppShell><ErrorBoundary><Events /></ErrorBoundary></AppShell>} />
-                <Route path="/events/:id" element={<AppShell><ErrorBoundary><EventDetail /></ErrorBoundary></AppShell>} />                <Route path="/chavee/onboarding" element={<AppShell><ErrorBoundary><Onboarding /></ErrorBoundary></AppShell>} />
+                <Route path="/earn"       element={shell(<Earn />)} />
+                <Route path="/network"    element={shell(<Network />)} />
+                <Route path="/network/:slug"      element={shell(<Network />)} />
+                <Route path="/network/:slug/join" element={shell(<Network />)} />
+                <Route path="/events"     element={shell(<Events />)} />
+                <Route path="/events/:id" element={shell(<EventDetail />)} />
+                <Route path="/chavee/onboarding" element={shell(<Onboarding />)} />
 
-                {/* ── Admin panel ── */}
-                <Route path="/admin"              element={<AdminShell><AdminDashboard /></AdminShell>} />
-                <Route path="/admin/communities"  element={<AdminShell><CommunitiesManager /></AdminShell>} />
-                <Route path="/admin/communities/new" element={<AdminShell><CreateCommunityWizard /></AdminShell>} />
-                <Route path="/admin/posts"        element={<AdminShell><PostsManager /></AdminShell>} />
-                <Route path="/admin/content"      element={<AdminShell><ContentManager /></AdminShell>} />
-                <Route path="/admin/education"    element={<AdminShell><EducationManager /></AdminShell>} />
-                <Route path="/admin/courses"      element={<AdminShell><CoursesManager /></AdminShell>} />
-                <Route path="/admin/scholarships" element={<AdminShell><ScholarshipsManager /></AdminShell>} />
-                <Route path="/admin/certifications" element={<AdminShell><CertificationsManager /></AdminShell>} />
-                <Route path="/admin/resources"    element={<AdminShell><ResourcesManager /></AdminShell>} />
-                <Route path="/admin/jobs"         element={<AdminShell><JobsManager /></AdminShell>} />
-                <Route path="/admin/companies"    element={<AdminShell><CompaniesManager /></AdminShell>} />
-                <Route path="/admin/testimonials" element={<AdminShell><TestimonialsManager /></AdminShell>} />
-                <Route path="/admin/gigs"         element={<AdminShell><GigsManager /></AdminShell>} />
-                <Route path="/admin/gig-moderation" element={<AdminShell><GigModerationQueue /></AdminShell>} />
-                <Route path="/admin/withdrawals"   element={<AdminShell><WithdrawalQueue /></AdminShell>} />
-                <Route path="/admin/contracts"     element={<AdminShell><ContractsOverview /></AdminShell>} />
-                <Route path="/admin/disputes"      element={<AdminShell><DisputeQueue /></AdminShell>} />
-                <Route path="/admin/events"       element={<AdminShell><EventsManager /></AdminShell>} />
-                <Route path="/admin/events/new"   element={<AdminShell><CreateEventWizard /></AdminShell>} />
-                <Route path="/admin/users"        element={<AdminShell><UsersManager /></AdminShell>} />
-                <Route path="/admin/reports"      element={<AdminShell><ReportsManager /></AdminShell>} />
-                <Route path="/admin/support-tickets" element={<AdminShell><SupportTicketsManager /></AdminShell>} />
-                <Route path="/admin/subscribers"  element={<AdminShell><SubscribersManager /></AdminShell>} />
+                {/* ── Admin panel — RequireAdmin (RequireAuth + is_admin) ── */}
+                <Route path="/admin"              element={adminShell(<AdminDashboard />)} />
+                <Route path="/admin/communities"  element={adminShell(<CommunitiesManager />)} />
+                <Route path="/admin/communities/new" element={adminShell(<CreateCommunityWizard />)} />
+                <Route path="/admin/posts"        element={adminShell(<PostsManager />)} />
+                <Route path="/admin/content"      element={adminShell(<ContentManager />)} />
+                <Route path="/admin/education"    element={adminShell(<EducationManager />)} />
+                <Route path="/admin/courses"      element={adminShell(<CoursesManager />)} />
+                <Route path="/admin/scholarships" element={adminShell(<ScholarshipsManager />)} />
+                <Route path="/admin/certifications" element={adminShell(<CertificationsManager />)} />
+                <Route path="/admin/resources"    element={adminShell(<ResourcesManager />)} />
+                <Route path="/admin/jobs"         element={adminShell(<JobsManager />)} />
+                <Route path="/admin/companies"    element={adminShell(<CompaniesManager />)} />
+                <Route path="/admin/testimonials" element={adminShell(<TestimonialsManager />)} />
+                <Route path="/admin/gigs"         element={adminShell(<GigsManager />)} />
+                <Route path="/admin/gig-moderation" element={adminShell(<GigModerationQueue />)} />
+                <Route path="/admin/withdrawals"   element={adminShell(<WithdrawalQueue />)} />
+                <Route path="/admin/contracts"     element={adminShell(<ContractsOverview />)} />
+                <Route path="/admin/disputes"      element={adminShell(<DisputeQueue />)} />
+                <Route path="/admin/events"       element={adminShell(<EventsManager />)} />
+                <Route path="/admin/events/new"   element={adminShell(<CreateEventWizard />)} />
+                <Route path="/admin/users"        element={adminShell(<UsersManager />)} />
+                <Route path="/admin/reports"      element={adminShell(<ReportsManager />)} />
+                <Route path="/admin/support-tickets" element={adminShell(<SupportTicketsManager />)} />
+                <Route path="/admin/subscribers"  element={adminShell(<SubscribersManager />)} />
 
                 {/* ── Redirect legacy routes ── */}
                 <Route path="/about"    element={<Navigate to="/about-us" replace />} />

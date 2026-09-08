@@ -6,12 +6,13 @@ import { ButtonSpinner } from '../components/Spinner.jsx';
 import SaveButton from '../components/SaveButton.jsx';
 import useNotifyMe from '../hooks/useNotifyMe.js';
 import NotifyMeButton from '../components/NotifyMeButton.jsx';
+import { useAuth } from '../hooks/useAuth.js';
 export default function CourseDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
     const { toast, showToast, hideToast } = useToast();
 
-    const [user, setUser] = useState(null);
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
     const { notifiedFeatures, loadingFeatures, toggleNotify } = useNotifyMe(user);
     const featureKey = `course:${id}`;
     const [course, setCourse] = useState(null);
@@ -22,9 +23,6 @@ export default function CourseDetail() {
         let isMounted = true;
         async function fetchCourse() {
             setLoading(true);
-            const { data: { session } } = await supabase.auth.getSession();
-            let currentUser = session?.user || null;
-            if (isMounted) setUser(currentUser);
 
             // Fetch course
             const { data: courseData, error } = await supabase

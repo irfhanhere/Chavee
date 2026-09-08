@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
+import { useAuth } from '../hooks/useAuth.js';
 import Toast, { useToast } from '../components/Toast.jsx';
 import PayoutSetupForm from '../components/PayoutSetupForm.jsx';
 import { usePresence } from '../hooks/usePresence.js';
@@ -20,7 +21,7 @@ export default function Messages() {
     const activeId = searchParams.get('id');
 
     const { toast, showToast, hideToast } = useToast();
-    const [user, setUser] = useState(null);
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
     const [currentUserProfile, setCurrentUserProfile] = useState(null);
     const [authLoading, setAuthLoading] = useState(true);
     
@@ -90,44 +91,27 @@ export default function Messages() {
     useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
     useEffect(() => { messagesCacheRef.current = messagesCache; }, [messagesCache]);
 
-    // Initial Auth & Profile Fetch
+    // Current-user profile fetch. Session is guarded upstream by
+    // <RequireAuth>, and `user` comes from <AuthProvider> — no getSession()
+    // / onAuthStateChange / redirect here any more.
     useEffect(() => {
+        if (!user) return undefined;
         let isMounted = true;
-        
-        const checkSessionAndFetchProfile = async (session) => {
-            if (!session) {
-                if (isMounted) navigate('/login');
-                return;
-            }
-            
-            if (isMounted) setUser(session.user);
-            
+        (async () => {
             try {
                 const { data: profile } = await supabase
                     .from('profiles')
                     .select('full_name, username')
-                    .eq('id', session.user.id)
+                    .eq('id', user.id)
                     .single();
                 if (isMounted) setCurrentUserProfile(profile);
             } catch (err) {
-                console.error("Failed to fetch user profile", err);
+                console.error('Failed to fetch user profile', err);
             }
             if (isMounted) setAuthLoading(false);
-        };
-
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (isMounted) checkSessionAndFetchProfile(session);
-        });
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (isMounted) checkSessionAndFetchProfile(session);
-        });
-
-        return () => { 
-            isMounted = false; 
-            subscription?.unsubscribe();
-        };
-    }, [navigate]);
+        })();
+        return () => { isMounted = false; };
+    }, [user]);
 
     const fetchConversations = useCallback(async () => {
         if (!user) return;

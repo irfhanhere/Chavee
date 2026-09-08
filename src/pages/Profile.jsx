@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
+import { useAuth } from '../hooks/useAuth.js';
 import Toast, { useToast } from '../components/Toast.jsx';
 import { PageLoader, ButtonSpinner } from '../components/Spinner.jsx';
 
@@ -16,8 +17,8 @@ export default function Profile() {
     const location = useLocation();
     const { id: profileParam } = useParams();
     const { toast, showToast } = useToast();
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
 
-    const [user, setUser] = useState(null);
     const [profile, setProfile] = useState(null);
     const [stats, setStats] = useState({
         connectionsCount: 0,
@@ -49,19 +50,6 @@ export default function Profile() {
     const handleTabChange = (tab) => {
         navigate(`/profile${profileParam ? `/${profileParam}` : ''}?tab=${tab}`);
     };
-
-    useEffect(() => {
-        const init = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                navigate('/login');
-                return;
-            }
-            setUser(session.user);
-            if (!profileParam) setIsOwnProfile(true);
-        };
-        init();
-    }, [navigate, profileParam]);
 
     useEffect(() => {
         if (!user) return;

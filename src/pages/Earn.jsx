@@ -8,6 +8,7 @@ import { logUserActivity } from '../utils/activityLogger.js';
 import SaveButton from '../components/SaveButton.jsx';
 import { sanitizeFilenameForStorageKey, getAttachmentSignedUrl } from '../utils/attachmentStorage.js';
 import { subscribeNotify } from '../utils/subscribeNotify.js';
+import { useAuth } from '../hooks/useAuth.js';
 
 // Jobs and gigs are both fetched from Supabase (see loadJobs / loadGigs below).
 
@@ -161,7 +162,7 @@ export default function Earn() {
         if (metaDesc) metaDesc.setAttribute('content', "Post your skills, find gig work, sell textbooks and earn as a student in India. Chavee's student marketplace connects students with real earning opportunities.");
     }, []);
 
-    const [user, setUser]                 = useState(null);
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
     const [gamification, setGamification] = useState(null);
     const [jobsList, setJobsList]         = useState([]);
     const [gigsList, setGigsList]         = useState([]);
@@ -391,39 +392,34 @@ export default function Earn() {
         }
     };
 
+    useEffect(() => { loadJobs(); }, []);
+
+    // `user` comes from <AuthProvider>; session is guarded by <RequireAuth>.
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session) {
-                setUser(session.user);
-                const g = localStorage.getItem(`gamification_${session.user.id}`);
-                if (g) setGamification(JSON.parse(g));
-                loadMyGigWorks(session.user.id);
+        if (!user) { loadGigs(undefined); return; }
 
-                // Step 6 — read for the post-form notice only (the actual
-                // gate is re-checked fresh at submit time in
-                // handlePostGigSubmit, this is just so the notice copy
-                // isn't misleadingly telling a trusted poster to expect a
-                // 2-hour review).
-                supabase.from('profiles').select('gig_auto_approve').eq('id', session.user.id).single()
-                    .then(({ data }) => setGigAutoApprove(!!data?.gig_auto_approve));
+        const g = localStorage.getItem(`gamification_${user.id}`);
+        if (g) setGamification(JSON.parse(g));
+        loadMyGigWorks(user.id);
 
-                // "Your Earnings" card — same real source/query Earnings.jsx uses
-                // (gig_contracts.seller_net_amount, approved contracts only).
-                supabase.from('gig_contracts').select('seller_net_amount')
-                    .eq('seller_id', session.user.id)
-                    .eq('status', 'approved')
-                    .then(({ data }) => {
-                        const sum = (data || []).reduce((s, c) => s + (Number(c.seller_net_amount) || 0), 0);
-                        setTotalEarned(sum);
-                    });
-            }
-            // Called only after we know whether there's a session, so the
-            // own-gigs merge in loadGigs has the right id on first load
-            // instead of racing this promise.
-            loadGigs(session?.user?.id);
-        });
-        loadJobs();
-    }, []);
+        // Step 6 — read for the post-form notice only (the actual gate is
+        // re-checked fresh at submit time in handlePostGigSubmit).
+        supabase.from('profiles').select('gig_auto_approve').eq('id', user.id).single()
+            .then(({ data }) => setGigAutoApprove(!!data?.gig_auto_approve));
+
+        // "Your Earnings" card — same real source/query Earnings.jsx uses
+        // (gig_contracts.seller_net_amount, approved contracts only).
+        supabase.from('gig_contracts').select('seller_net_amount')
+            .eq('seller_id', user.id)
+            .eq('status', 'approved')
+            .then(({ data }) => {
+                const sum = (data || []).reduce((s, c) => s + (Number(c.seller_net_amount) || 0), 0);
+                setTotalEarned(sum);
+            });
+
+        loadGigs(user.id);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user]);
 
     useEffect(() => {
         const highlightGigId = searchParams.get('highlightGigId');

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
+import { useAuth } from '../hooks/useAuth.js';
 import Toast, { useToast } from '../components/Toast.jsx';
 
 import CommunitiesTab from './network/CommunitiesTab.jsx';
@@ -12,25 +13,14 @@ export default function Network() {
     const { toast, showToast } = useToast();
     const { slug } = useParams();
     const navigate = useNavigate();
-    const [user, setUser] = useState(null);
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>;
+                                 // replaces a local getSession + onAuthStateChange
     const [activeTab, setActiveTab] = useState('Communities');
 
     // If a community is selected (via URL slug), this holds the community object and we render CommunityLanding
     const [activeCommunity, setActiveCommunity] = useState(null);
     const [communityLoading, setCommunityLoading] = useState(false);
     const [communityNotFound, setCommunityNotFound] = useState(false);
-
-    useEffect(() => {
-        const getSession = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            setUser(session?.user || null);
-        };
-        getSession();
-        const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-            setUser(session?.user || null);
-        });
-        return () => authListener.subscription.unsubscribe();
-    }, []);
 
     // Load the community directly from the URL slug — this is what makes a direct visit or
     // hard refresh of /network/:slug (or /network/:slug/join) work without requiring the

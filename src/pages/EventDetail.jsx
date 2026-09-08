@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
+import { useAuth } from '../hooks/useAuth.js';
 import Toast, { useToast } from '../components/Toast.jsx';
 import SaveButton from '../components/SaveButton.jsx';
 import { ButtonSpinner } from '../components/Spinner.jsx';
@@ -20,7 +21,7 @@ export default function EventDetail() {
     const { id } = useParams(); // Could be ID or slug
     const { toast, showToast, hideToast } = useToast();
 
-    const [user, setUser] = useState(null);
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
     const [event, setEvent] = useState(null);
     const [similarEvents, setSimilarEvents] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -37,13 +38,8 @@ export default function EventDetail() {
         const loadUserAndEvent = async () => {
             setLoading(true);
             try {
-                // 1. Get session
-                const { data: { session } } = await supabase.auth.getSession();
-                let currentUser = null;
-                if (session) {
-                    currentUser = session.user;
-                    setUser(currentUser);
-                }
+                // `user` comes from <AuthProvider>; no getSession() here.
+                const currentUser = user;
 
                 // 2. Fetch event by id or slug
                 const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
@@ -93,7 +89,8 @@ export default function EventDetail() {
         
         loadUserAndEvent();
         return () => { isMounted = false; };
-    }, [id]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [id, user?.id]);
 
     const handleRegister = async () => {
         if (!user) {

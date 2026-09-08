@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
+import { useAuth } from '../hooks/useAuth.js';
 import { PageLoader } from '../components/Spinner.jsx';
 import Toast, { useToast } from '../components/Toast.jsx';
 import WithdrawRequestForm from '../components/WithdrawRequestForm.jsx';
@@ -23,25 +23,12 @@ const WITHDRAWAL_STATUS_STYLES = {
 const withdrawalStatusStyle = (status) => WITHDRAWAL_STATUS_STYLES[status] || { background: 'rgba(148,163,184,0.12)', color: 'var(--text-muted)', border: 'var(--border-color)', label: status || 'Unknown' };
 
 export default function Earnings() {
-    const navigate = useNavigate();
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
     const { toast, showToast, hideToast } = useToast();
-    const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [earnings, setEarnings] = useState([]);
     const [withdrawals, setWithdrawals] = useState([]);
     const [withdrawalsLoading, setWithdrawalsLoading] = useState(true);
-
-    useEffect(() => {
-        const init = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                navigate('/login');
-                return;
-            }
-            setUser(session.user);
-        };
-        init();
-    }, [navigate]);
 
     useEffect(() => {
         const fetchEarnings = async () => {

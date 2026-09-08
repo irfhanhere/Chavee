@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
+import { useAuth } from '../hooks/useAuth.js';
 
 const RECENT_SEARCHES_CAP = 8;
 
@@ -23,7 +24,7 @@ const CATEGORIES = [
 
 export default function Search() {
     const navigate = useNavigate();
-    const [user, setUser] = useState(null);
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
     const [query, setQuery] = useState('');
     const [results, setResults] = useState([]); // [{ category, icon, label, id, title, link }]
     const [loading, setLoading] = useState(false);
@@ -31,18 +32,15 @@ export default function Search() {
     const debounceRef = useRef(null);
 
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (!session) { navigate('/login'); return; }
-            setUser(session.user);
-            // localStorage, per-user, this-device-only — no search_history table
-            // exists (confirmed live earlier this pass), so this is real recent-
-            // search data, just not server-persisted or synced cross-device.
-            try {
-                const stored = JSON.parse(localStorage.getItem(`recent_searches_${session.user.id}`) || '[]');
-                setRecentSearches(Array.isArray(stored) ? stored : []);
-            } catch { setRecentSearches([]); }
-        });
-    }, [navigate]);
+        if (!user) return;
+        // localStorage, per-user, this-device-only — no search_history table
+        // exists (confirmed live earlier this pass), so this is real recent-
+        // search data, just not server-persisted or synced cross-device.
+        try {
+            const stored = JSON.parse(localStorage.getItem(`recent_searches_${user.id}`) || '[]');
+            setRecentSearches(Array.isArray(stored) ? stored : []);
+        } catch { setRecentSearches([]); }
+    }, [user]);
 
     // Writes to localStorage directly (not from inside the setState updater) —
     // handleSelectResult calls this immediately followed by navigate(), and

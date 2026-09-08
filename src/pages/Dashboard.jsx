@@ -9,6 +9,7 @@ import SaveButton from '../components/SaveButton.jsx';
 import NotifyMeButton from '../components/NotifyMeButton.jsx';
 import { subscribeNotify } from '../utils/subscribeNotify.js';
 import { useIsMobile } from '../hooks/useIsMobile.js';
+import { useAuth } from '../hooks/useAuth.js';
 
 /* ── No hardcoded seed data — everything comes from Supabase ── */
 
@@ -393,7 +394,7 @@ export default function Dashboard() {
     const fileInputRef = useRef(null);
     const feedTabsRef = useRef(null); // mobile Announcements-preview "View all" scrolls here
 
-    const [user, setUser] = useState(null);
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
     const [sessionLoading, setSessionLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('home');
 
@@ -536,22 +537,11 @@ export default function Dashboard() {
         }
     };
 
-    // ── Auth guard ───────────────────────────────────────────────
-    useEffect(() => {
-        const checkSession = async () => {
-            try {
-                const { data: { session }, error } = await supabase.auth.getSession();
-                if (error || !session) { navigate('/login'); return; }
-                setUser(session.user);
-                setSessionLoading(false);
-            } catch { navigate('/login'); }
-        };
-        checkSession();
-    }, [navigate]);
-
-    // ── Load data after auth ─────────────────────────────────────
+    // ── Load data (session guarded upstream by <RequireAuth>; `user`
+    //    comes from <AuthProvider>) ────────────────────────────────
     useEffect(() => {
         if (!user) return;
+        setSessionLoading(false);
         fetchProfile();
         fetchGamification();
         fetchRegistrations();

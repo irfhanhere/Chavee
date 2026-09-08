@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
+import { useAuth } from '../hooks/useAuth.js';
 import { ChaveeLogo } from '../Logo.jsx';
 import { PageLoader } from './Spinner.jsx';
 import HeaderActions from './HeaderActions.jsx';
@@ -108,11 +109,10 @@ const renderAvatar = (avatarData, name, size = 34, fontSize = '0.9rem') => {
 };
 
 export default function AppShell({ children }) {
-    const navigate  = useNavigate();
     const location  = useLocation();
     const mainRef = useRef(null);
 
-    const [user, setUser]               = useState(null);
+    const { user, signOut }             = useAuth();
     const [gamification, setGamification] = useState(null);
     const [profile, setProfile]         = useState(null);
     const [checking, setChecking]       = useState(true);
@@ -137,53 +137,51 @@ export default function AppShell({ children }) {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // ── Auth guard + gamification + profile load ───────────────────────────
+    // ── previewMode: a logged-out visitor who opted into "preview the app".
+    // <RequireAuth allowPreview> is what actually lets this shell render
+    // for them; here we just mirror the flag into local state. ───────────
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (!session) { 
-                if (sessionStorage.getItem('previewMode') === 'true') {
-                    setPreviewMode(true);
-                    setChecking(false);
-                    return;
-                }
-                navigate('/login'); 
-                return; 
-            }
-            setUser(session.user);
+        if (user) { setPreviewMode(false); return; }
+        try { setPreviewMode(sessionStorage.getItem('previewMode') === 'true'); }
+        catch { setPreviewMode(false); }
+    }, [user]);
 
-            // Load gamification & profile from localStorage first (instant)
-            const local = localStorage.getItem(`gamification_${session.user.id}`);
-            if (local) setGamification(JSON.parse(local));
+    // ── gamification + profile + admin flag — load once we have a user.
+    // No getSession()/redirect here any more: auth is guarded upstream by
+    // <RequireAuth>, and `user` comes from <AuthProvider>. ───────────────
+    useEffect(() => {
+        if (!user) { setChecking(false); return; }
+        setChecking(true);
 
-            const localProfile = localStorage.getItem(`profile_${session.user.id}`);
-            if (localProfile) setProfile(JSON.parse(localProfile));
+        // localStorage first (instant), then sync from the DB.
+        const local = localStorage.getItem(`gamification_${user.id}`);
+        if (local) setGamification(JSON.parse(local));
 
-            // Sync gamification
-            supabase
-                .from('user_gamification')
-                .select('*')
-                .eq('user_id', session.user.id)
-                .single()
-                .then(({ data }) => { if (data) { setGamification(data); localStorage.setItem(`gamification_${session.user.id}`, JSON.stringify(data)); } })
-                .catch(() => {});
+        const localProfile = localStorage.getItem(`profile_${user.id}`);
+        if (localProfile) setProfile(JSON.parse(localProfile));
 
-            // Sync profile
-            supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', session.user.id)
-                .single()
-                .then(({ data }) => { if (data) { setProfile(data); localStorage.setItem(`profile_${session.user.id}`, JSON.stringify(data)); } })
-                .catch(() => {})
-                .finally(() => setChecking(false));
+        supabase
+            .from('user_gamification')
+            .select('*')
+            .eq('user_id', user.id)
+            .single()
+            .then(({ data }) => { if (data) { setGamification(data); localStorage.setItem(`gamification_${user.id}`, JSON.stringify(data)); } })
+            .catch(() => {});
 
-            // Check admin status via RPC
-            supabase
-                .rpc('is_admin')
-                .then(({ data }) => { setIsAdmin(!!data); })
-                .catch(() => {});
-        }).catch(() => navigate('/login'));
-    }, [navigate]);
+        supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single()
+            .then(({ data }) => { if (data) { setProfile(data); localStorage.setItem(`profile_${user.id}`, JSON.stringify(data)); } })
+            .catch(() => {})
+            .finally(() => setChecking(false));
+
+        supabase
+            .rpc('is_admin')
+            .then(({ data }) => { setIsAdmin(!!data); })
+            .catch(() => {});
+    }, [user]);
 
     // Keep profile state updated on route changes (in case customized)
     useEffect(() => {
@@ -246,12 +244,9 @@ export default function AppShell({ children }) {
         return () => document.removeEventListener('click', handler, true);
     }, [previewMode]);
 
-    if (checking && !user && !previewMode) return <PageLoader message="Loading Chavee... 🔒" />;
+    if (!user && !previewMode) return <PageLoader message="Loading Chavee... 🔒" />;
 
-    const handleLogout = async () => {
-        await supabase.auth.signOut();
-        navigate('/login');
-    };
+    const handleLogout = signOut;
 
     const isActive = (path) => {
         if (path === '/events') return location.pathname.startsWith('/events');

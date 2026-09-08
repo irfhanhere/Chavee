@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../supabaseClient.js';
+import { useAuth } from '../../../hooks/useAuth.js';
 import DataTable from '../components/DataTable.jsx';
 import FormModal from '../components/FormModal.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
@@ -73,8 +74,7 @@ export default function CommunitiesManager() {
     const [viewingCommunity, setViewingCommunity] = useState(null);
     const [saving, setSaving] = useState(false);
     
-    const [user, setUser] = useState(null);
-    useEffect(() => { supabase.auth.getSession().then(({ data: { session } }) => { if (session) setUser(session.user); }); }, []);
+    const { user } = useAuth();   // guarded upstream by <RequireAdmin>
 
     const loadData = useCallback(async () => {
         setLoading(true);

@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
+import { useAuth } from '../hooks/useAuth.js';
 import { PageLoader, ButtonSpinner } from '../components/Spinner.jsx';
 import Toast, { useToast } from '../components/Toast.jsx';
-import { useNavigate } from 'react-router-dom';
 
 export default function SavedItems() {
     const { toast, showToast } = useToast();
     const navigate = useNavigate();
-    const [user, setUser] = useState(null);
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
     const [loading, setLoading] = useState(true);
     
     // Grouped items: { job: [], gig: [], event: [], course: [], scholarship: [], community: [], post: [] }
@@ -24,18 +25,6 @@ export default function SavedItems() {
         { id: 'community', label: 'Communities' },
         { id: 'post', label: 'Posts' }
     ];
-
-    useEffect(() => {
-        const init = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                navigate('/login');
-                return;
-            }
-            setUser(session.user);
-        };
-        init();
-    }, [navigate]);
 
     useEffect(() => {
         const fetchSaved = async () => {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { supabase } from '../../supabaseClient.js';
+import { Link, useLocation } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth.js';
 import HeaderActions from '../../components/HeaderActions.jsx';
 import SEO from '../../components/SEO.jsx';
 
@@ -57,67 +57,21 @@ const ANIMATIONS = `
 `;
 
 export default function AdminShell({ children }) {
-    const navigate = useNavigate();
     const location = useLocation();
 
-    const [user, setUser]       = useState(null);
-    const [checking, setChecking] = useState(true);
+    // Session + admin authorisation are guarded upstream by <RequireAdmin>
+    // (RequireAuth + is_admin() RPC). This shell only mounts once that has
+    // passed — no getSession()/is_admin check here.
+    const { user, signOut } = useAuth();
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [eduExpanded, setEduExpanded] = useState(false);
 
-    useEffect(() => {
-        const check = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) { navigate('/login'); return; }
-            setUser(session.user);
-
-            // Admin guard — real is_admin() RPC only. This used to also trust
-            // any account whose email merely contained "admin" or "qa_user"
-            // as a client-side-only bypass, with zero backing in the actual
-            // `admins` table or the events/admins RLS policies (confirmed
-            // live: is_admin() returns false and there's no admins row for
-            // an "admin_..." test account that could still reach this whole
-            // panel, including Add/Edit/Delete on every manager). Removed —
-            // the client-side gate now agrees with what the database
-            // actually enforces, instead of quietly disagreeing with it.
-            const { data } = await supabase.rpc('is_admin');
-            const isAdmin = !!data;
-
-            if (!isAdmin) {
-                navigate('/dashboard');
-                return;
-            }
-            setChecking(false);
-        };
-        check();
-    }, [navigate]);
-
     useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
-
-    if (checking) {
-        return (
-            <div style={{
-                minHeight: '100vh', background: 'var(--bg-base)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                flexDirection: 'column', gap: '1.25rem',
-            }}>
-                <div style={{
-                    width: 44, height: 44, border: '3px solid var(--peacock-green)',
-                    borderTopColor: 'var(--emerald-light)', borderRadius: '50%',
-                    animation: 'spin 0.8s linear infinite',
-                }} />
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: 0 }}>Verifying admin access…</p>
-            </div>
-        );
-    }
 
     const isActive = (path) =>
         path === '/admin' ? location.pathname === '/admin' : location.pathname.startsWith(path);
 
-    const handleLogout = async () => {
-        await supabase.auth.signOut();
-        navigate('/login');
-    };
+    const handleLogout = signOut;
 
     const SidebarContent = () => (
         <>

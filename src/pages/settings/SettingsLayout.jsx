@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link, Navigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient.js';
+import { useAuth } from '../../hooks/useAuth.js';
 import Toast, { useToast } from '../../components/Toast.jsx';
 import { PageLoader } from '../../components/Spinner.jsx';
 
@@ -18,32 +19,27 @@ export default function SettingsLayout() {
     const { tab } = useParams();
     const { toast, showToast, hideToast } = useToast();
     
-    const [user, setUser] = useState(null);
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
 
     const activeTab = tab || 'account';
 
     useEffect(() => {
-        const fetchUserAndProfile = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                navigate('/login');
-                return;
-            }
-            setUser(session.user);
-
-            const { data, error } = await supabase
+        if (!user) return;
+        let cancelled = false;
+        (async () => {
+            const { data } = await supabase
                 .from('profiles')
                 .select('*')
-                .eq('id', session.user.id)
+                .eq('id', user.id)
                 .single();
-
+            if (cancelled) return;
             if (data) setProfile(data);
             setLoading(false);
-        };
-        fetchUserAndProfile();
-    }, [navigate]);
+        })();
+        return () => { cancelled = true; };
+    }, [user]);
 
     const handleLogout = async () => {
         if (window.confirm("Are you sure you want to log out?")) {

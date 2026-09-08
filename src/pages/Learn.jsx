@@ -8,13 +8,14 @@ import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import useNotifyMe from '../hooks/useNotifyMe.js';
 import NotifyMeButton from '../components/NotifyMeButton.jsx';
 import { subscribeNotify } from '../utils/subscribeNotify.js';
+import { useAuth } from '../hooks/useAuth.js';
 
 export default function Learn() {
     const navigate = useNavigate();
     const location = useLocation();
     const { toast, showToast, hideToast } = useToast();
 
-    const [user, setUser] = useState(null);
+    const { user } = useAuth();   // session guarded upstream by <RequireAuth>
     const [profile, setProfile] = useState(null);
     const [gamification, setGamification] = useState(null);
     
@@ -73,12 +74,11 @@ export default function Learn() {
     useEffect(() => {
         async function fetchAllData() {
             setLoadingData(true);
-            
-            const { data: sessionData } = await supabase.auth.getSession();
-            const sessionUser = sessionData?.session?.user;
-            
+
+            // `user` comes from <AuthProvider>; no getSession() here.
+            const sessionUser = user;
+
             if (sessionUser) {
-                setUser(sessionUser);
                 const localProfile = localStorage.getItem(`profile_${sessionUser.id}`);
                 if (localProfile) setProfile(JSON.parse(localProfile));
                 const localGamification = localStorage.getItem(`gamification_${sessionUser.id}`);
@@ -137,7 +137,8 @@ export default function Learn() {
             setLoadingData(false);
         }
         fetchAllData();
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.id]);
 
     // Handlers
     const handleRequestSubmit = async (e) => {

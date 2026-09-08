@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../../../supabaseClient.js';
+import { useAuth } from '../../../hooks/useAuth.js';
 import DataTable from '../components/DataTable.jsx';
 import FormModal from '../components/FormModal.jsx';
 
@@ -89,13 +90,7 @@ export default function ContentManager() {
     const [confirmDelete, setConfirmDelete] = useState({ open: false, row: null });
     
     const [saving, setSaving] = useState(false);
-    const [user, setUser] = useState(null);
-
-    useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session) setUser(session.user);
-        });
-    }, []);
+    const { user } = useAuth();   // guarded upstream by <RequireAdmin>
 
     const loadData = useCallback(async () => {
         setLoading(true);
