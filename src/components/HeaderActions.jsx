@@ -1,17 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient.js';
+import useNotifications from '../hooks/useNotifications.js';
 
 export default function HeaderActions({ user }) {
     const navigate = useNavigate();
     const [unreadMessages, setUnreadMessages] = useState(0);
-    const [unreadNotifications, setUnreadNotifications] = useState(0);
-    const [notifications, setNotifications] = useState([]);
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('All'); // 'All' | 'Unread' | 'Read'
     const dropdownRef = useRef(null);
 
     const userId = user?.id;
+
+    // Notifications: shared hook (initial fetch + realtime user_id filter +
+    // mark-read), same source the /notifications page uses.
+    const { notifications, unreadCount: unreadNotifications, markRead } = useNotifications(userId);
 
     // Fetch counts and notifications
     const fetchUnreadMessages = async () => {
@@ -44,52 +47,22 @@ export default function HeaderActions({ user }) {
         }
     };
 
-    const fetchNotifications = async () => {
-        if (!userId) return;
-        try {
-            const { data, error } = await supabase
-                .from('notifications')
-                .select('*')
-                .eq('user_id', userId)
-                .order('created_at', { ascending: false });
-
-            if (error) throw error;
-            setNotifications(data || []);
-            setUnreadNotificationsCount(data || []);
-        } catch (err) {
-            console.error('Error fetching notifications:', err);
-        }
-    };
-
-    const setUnreadNotificationsCount = (data) => {
-        const count = data.filter(n => !n.is_read).length;
-        setUnreadNotifications(count);
-    };
-
-    // Pulling logic
+    // Unread message count — separate concern from notifications, kept here.
     useEffect(() => {
         if (!userId) return;
 
         fetchUnreadMessages();
-        fetchNotifications();
 
-        // Used a debounce timer for Realtime to prevent spam
         let timeoutId;
         const debouncedFetchUnread = () => {
             clearTimeout(timeoutId);
             timeoutId = setTimeout(fetchUnreadMessages, 1000);
         };
 
-        // Supabase Realtime subscriptions
         const channel = supabase
-            .channel(`header-updates-${userId}`)
+            .channel(`header-messages-${userId}`)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
                 debouncedFetchUnread();
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, (payload) => {
-                if (payload.new && payload.new.user_id === userId) {
-                    fetchNotifications();
-                }
             })
             .subscribe();
 
@@ -110,36 +83,10 @@ export default function HeaderActions({ user }) {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const markNotificationRead = async (notif) => {
-        if (notif.is_read) {
-            navigate(notif.link);
-            setDropdownOpen(false);
-            return;
-        }
-
-        try {
-            const { error } = await supabase
-                .from('notifications')
-                .update({ is_read: true })
-                .eq('id', notif.id);
-
-            if (error) throw error;
-            
-            // Update local state
-            setNotifications(prev =>
-                prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n)
-            );
-            setUnreadNotifications(prev => Math.max(0, prev - 1));
-
-            // Navigate
-            navigate(notif.link);
-            setDropdownOpen(false);
-        } catch (err) {
-            console.error('Error marking notification read:', err);
-            // Navigate anyway as fallback
-            navigate(notif.link);
-            setDropdownOpen(false);
-        }
+    const markNotificationRead = (notif) => {
+        if (!notif.is_read) markRead(notif.id);   // optimistic; hook handles the DB write
+        if (notif.link) navigate(notif.link);
+        setDropdownOpen(false);
     };
 
     const getNotificationIcon = (type) => {

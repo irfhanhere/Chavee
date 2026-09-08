@@ -11,10 +11,76 @@ const ICONS = {
     transactions: '💼', ip: '©️', report: '🚩', consequences: '⚠️'
 };
 
+const ADDITIONAL_GUIDELINES = [
+    {
+        id: 'prohibited',
+        icon: '🚫',
+        title: 'Prohibited Conduct',
+        color: '#EF4444',
+        items: [
+            'Post content that is defamatory, harassing, hateful, sexually explicit, obscene, or otherwise harmful to any individual or group.',
+            'Impersonate any person, institution, or entity, or misrepresent your affiliation with any college, employer, or organisation.',
+            'Engage in spamming, phishing, or fraudulent activity — including fake gig listings, fabricated job postings, or deceptive promotions.',
+            "Attempt to gain unauthorised access to other users' accounts, private data, or Chavee's systems and infrastructure.",
+            'Use automated tools (bots, scrapers, crawlers) to access or interact with the platform without prior written consent from Chavee.',
+            'Upload or distribute malicious code, malware, or content intended to disrupt the normal operation of the platform.',
+        ]
+    },
+    {
+        id: 'academic',
+        icon: '🎓',
+        title: 'Academic Integrity',
+        color: '#F59E0B',
+        items: [
+            'Chavee must not be used to facilitate academic dishonesty of any kind, including plagiarism, cheating, exam misconduct, or contract cheating.',
+            'Do not share, distribute, or solicit answers to examination questions, assessments, or graded coursework on the platform.',
+            'Content that enables or promotes academic fraud — including paid assignment completion services — is strictly prohibited.',
+            'Users found violating academic integrity standards may be reported to their respective institutions in addition to platform-level action.',
+        ]
+    },
+    {
+        id: 'security',
+        icon: '🔐',
+        title: 'Platform Security & Privacy',
+        color: '#6366F1',
+        items: [
+            "Do not collect, store, or share other users' personal information (including phone numbers, addresses, or financial details) without their explicit consent.",
+            "Do not attempt to reverse-engineer, decompile, or exploit any part of Chavee's technology, APIs, or source code.",
+            'Report suspected security vulnerabilities responsibly to our team at support@chavee.in rather than exploiting or publicising them.',
+            'Users are responsible for maintaining the confidentiality of their login credentials. Sharing account access with third parties is not permitted.',
+        ]
+    },
+    {
+        id: 'moderation',
+        icon: '⚖️',
+        title: 'Moderation & Enforcement',
+        color: '#059669',
+        items: [
+            'Chavee reserves the right to remove any content that violates these guidelines, with or without prior notice.',
+            'Violations may result in a formal warning, temporary suspension, permanent account termination, or referral to law enforcement — depending on severity.',
+            'Repeated minor violations will be treated cumulatively. Escalating enforcement actions may be applied even if individual incidents appear minor in isolation.',
+            "Moderation decisions are made at Chavee's sole discretion. While we aim for consistency, each case is evaluated on its individual merits.",
+        ]
+    },
+    {
+        id: 'appeals',
+        icon: '📬',
+        title: 'Appeals & Feedback',
+        color: '#0EA5E9',
+        items: [
+            'If you believe a moderation action taken against your account or content was made in error, you may submit an appeal via the Help Centre within 14 days.',
+            'Appeals should include a clear explanation of why you believe the action was incorrect and any relevant supporting context.',
+            'Chavee will review appeals and respond within a reasonable timeframe. Decisions on appeals are final.',
+            'We welcome feedback on these guidelines. If you have suggestions for improving clarity or fairness, email us at community@chavee.in.',
+        ]
+    },
+];
+
 export default function CommunityGuidelines() {
     const [sections, setSections] = useState([]);
     const [loading, setLoading] = useState(true);
     const [openId, setOpenId] = useState(null);
+    const [openAddlId, setOpenAddlId] = useState(null);
 
     useEffect(() => {
         const load = async () => {
@@ -167,6 +233,97 @@ export default function CommunityGuidelines() {
                             <Link to="/help" className="btn-primary" style={{ padding: '0.7rem 1.5rem', borderRadius: 10, fontSize: '0.85rem', textDecoration: 'none', whiteSpace: 'nowrap' }}>
                                 Report an Issue
                             </Link>
+                        </div>
+
+                        {/* ── Additional Guidelines — sourced from Chavee Community Guidelines v2 PDF ── */}
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
+                                <div>
+                                    <h2 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                                        Additional Guidelines
+                                    </h2>
+                                    <p style={{ margin: '0.3rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                                        Detailed conduct standards sourced from the official Chavee Community Guidelines document.
+                                    </p>
+                                </div>
+                                <a
+                                    href="/Legal/Chavee_Community_Guidelines-2.pdf"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                                        padding: '0.5rem 1rem', borderRadius: 8, fontSize: '0.8rem',
+                                        fontWeight: 700, textDecoration: 'none', color: 'var(--peacock-green)',
+                                        border: '1.5px solid var(--border-mint)', background: 'var(--bg-mint)',
+                                        whiteSpace: 'nowrap', transition: 'background 0.15s'
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(17,94,89,0.12)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-mint)'}
+                                >
+                                    📄 Download Full PDF
+                                </a>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
+                                {ADDITIONAL_GUIDELINES.map(section => {
+                                    const isOpen = openAddlId === section.id;
+                                    return (
+                                        <div key={section.id} style={{ ...S.card, overflow: 'hidden' }}>
+                                            <button
+                                                onClick={() => setOpenAddlId(isOpen ? null : section.id)}
+                                                style={{
+                                                    width: '100%', textAlign: 'left', background: 'none', border: 'none',
+                                                    padding: '1rem 1.25rem', cursor: 'pointer',
+                                                    display: 'flex', alignItems: 'center', gap: '0.85rem'
+                                                }}
+                                            >
+                                                <span style={{
+                                                    width: 34, height: 34, borderRadius: 9, flexShrink: 0,
+                                                    background: `${section.color}18`,
+                                                    color: section.color,
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    fontSize: '1rem'
+                                                }}>
+                                                    {section.icon}
+                                                </span>
+                                                <span style={{ flex: 1, fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+                                                    {section.title}
+                                                </span>
+                                                <span style={{
+                                                    color: 'var(--text-muted)', fontSize: '0.75rem',
+                                                    transform: isOpen ? 'rotate(180deg)' : 'none',
+                                                    transition: 'transform 0.15s', flexShrink: 0
+                                                }}>⌄</span>
+                                            </button>
+
+                                            {isOpen && (
+                                                <ul style={{ margin: 0, padding: '0 1.25rem 1.25rem 1.25rem', listStyle: 'none' }}>
+                                                    {section.items.map((item, idx) => (
+                                                        <li key={idx} style={{
+                                                            display: 'flex', gap: '0.6rem', alignItems: 'flex-start',
+                                                            fontSize: '0.82rem', lineHeight: 1.6,
+                                                            color: 'var(--text-secondary)',
+                                                            paddingBottom: idx < section.items.length - 1 ? '0.6rem' : 0,
+                                                            marginBottom: idx < section.items.length - 1 ? '0.6rem' : 0,
+                                                            borderBottom: idx < section.items.length - 1 ? '1px solid var(--border-color)' : 'none'
+                                                        }}>
+                                                            <span style={{ color: section.color, fontWeight: 800, flexShrink: 0, marginTop: '0.05rem' }}>•</span>
+                                                            {item}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Source attribution */}
+                            <p style={{ marginTop: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                <span>📄</span>
+                                These additional guidelines are sourced directly from the <em>Chavee Community Guidelines v2</em> official document.
+                                Any conflict between this page and the PDF shall be resolved in favour of the PDF.
+                            </p>
                         </div>
                     </div>
                 )}

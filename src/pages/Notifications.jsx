@@ -1,59 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { supabase } from '../supabaseClient.js';
 import { PageLoader, ButtonSpinner } from '../components/Spinner.jsx';
 import Toast, { useToast } from '../components/Toast.jsx';
+import { useNotifications } from '../hooks/useNotifications.js';
 
 export default function Notifications() {
     const navigate = useNavigate();
     const { toast, showToast, hideToast } = useToast();
-    
-    const [notifications, setNotifications] = useState([]);
-    const [loading, setLoading] = useState(true);
+
+    // Shared hook — same source as the header bell (initial fetch +
+    // realtime user_id filter + mark-read / mark-all-read).
+    const { notifications, loading, markRead, markAllRead } = useNotifications();
     const [marking, setMarking] = useState(false);
-    
     const [activeTab, setActiveTab] = useState('All');
-
-    useEffect(() => {
-        const fetchNotifications = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                navigate('/login');
-                return;
-            }
-
-            const { data, error } = await supabase
-                .from('notifications')
-                .select('*')
-                .eq('user_id', session.user.id)
-                .order('created_at', { ascending: false });
-
-            if (error) {
-                console.error("Error fetching notifications:", error);
-            } else {
-                setNotifications(data || []);
-            }
-            setLoading(false);
-        };
-        fetchNotifications();
-    }, [navigate]);
 
     const handleMarkAllRead = async () => {
         setMarking(true);
         try {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) return;
-
-            const { error } = await supabase
-                .from('notifications')
-                .update({ is_read: true })
-                .eq('user_id', session.user.id)
-                .eq('is_read', false);
-
-            if (error) throw error;
-            
-            // Update local state
-            setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+            await markAllRead();
             showToast("All notifications marked as read", "success");
         } catch (err) {
             console.error("Error marking all read:", err);
@@ -63,21 +27,9 @@ export default function Notifications() {
         }
     };
 
-    const handleMarkSingleRead = async (id, link) => {
-        try {
-            const { error } = await supabase
-                .from('notifications')
-                .update({ is_read: true })
-                .eq('id', id);
-            
-            if (!error) {
-                setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-            }
-            if (link) navigate(link);
-        } catch (err) {
-            console.error("Error marking read:", err);
-            if (link) navigate(link); // Navigate anyway
-        }
+    const handleMarkSingleRead = (id, link) => {
+        markRead(id);            // optimistic; hook writes to the DB
+        if (link) navigate(link);
     };
 
     if (loading) return <PageLoader message="Loading notifications..." />;
@@ -221,7 +173,7 @@ export default function Notifications() {
                                                         </span>
                                                     </div>
                                                     <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                                                        {n.message}
+                                                        {n.body}
                                                     </p>
                                                 </div>
                                                 {!n.is_read && <div style={S.dot} />}

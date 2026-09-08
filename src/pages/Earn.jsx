@@ -7,6 +7,7 @@ import { getCvSignedUrl } from '../utils/cvStorage.js';
 import { logUserActivity } from '../utils/activityLogger.js';
 import SaveButton from '../components/SaveButton.jsx';
 import { sanitizeFilenameForStorageKey, getAttachmentSignedUrl } from '../utils/attachmentStorage.js';
+import { subscribeNotify } from '../utils/subscribeNotify.js';
 
 // Jobs and gigs are both fetched from Supabase (see loadJobs / loadGigs below).
 
@@ -268,32 +269,24 @@ export default function Earn() {
         if (!user || submittingFeatures[featureKey]) return;
         setSubmittingFeatures(prev => ({ ...prev, [featureKey]: true }));
         try {
-            const { data: existing } = await supabase
-                .from('notify_subscribers')
-                .select('id')
-                .eq('user_id', user.id)
-                .eq('feature_key', featureKey)
-                .single();
-
-            if (existing) {
-                showToast("You're already on the list!", 'info');
-                return;
-            }
-
             const profileStr = localStorage.getItem(`profile_${user.id}`);
             const profile = profileStr ? JSON.parse(profileStr) : null;
 
-            const { error } = await supabase.from('notify_subscribers').insert({
-                user_id: user.id,
-                email: user.email || (profile?.email) || '',
-                feature_key: featureKey
+            // Via the subscribe-notify Edge Function; user_id is derived
+            // from the caller's JWT server-side, and dedup is handled there.
+            const res = await subscribeNotify({
+                email: user.email || profile?.email || '',
+                featureKey,
             });
-
-            if (error) throw error;
-            showToast("You're on the list! We'll email you when this launches.", 'success');
+            showToast(
+                res.alreadySubscribed
+                    ? "You're already on the list!"
+                    : "You're on the list! We'll email you when this launches.",
+                res.alreadySubscribed ? 'info' : 'success'
+            );
         } catch (err) {
             console.error(err);
-            showToast("Failed to subscribe.", 'error');
+            showToast(err.message || "Failed to subscribe.", 'error');
         } finally {
             setSubmittingFeatures(prev => ({ ...prev, [featureKey]: false }));
         }
@@ -888,17 +881,9 @@ export default function Earn() {
                 }
 
                 showToast('🎉 Proposal sent! Redirecting to your messages...', 'success');
-                if (gigSnapshot.posted_by) {
-                    try {
-                        await supabase.rpc('create_notification', {
-                            p_user_id: gigSnapshot.posted_by,
-                            p_type: 'gig_application',
-                            p_title: '💼 New Gig Proposal Received!',
-                            p_body: `Someone applied to your gig "${gigSnapshot.title || 'Gig listing'}".`,
-                            p_link: '/earn'
-                        });
-                    } catch (nErr) { console.error(nErr); }
-                }
+                // The gig owner's "new pitch" notification is produced
+                // server-side by the handle_new_gig_application trigger on
+                // gig_applications INSERT — no client call needed.
 
                 let conversationId = inserted?.conversation_id || null;
                 if (!conversationId && inserted?.id) {

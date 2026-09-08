@@ -10,6 +10,7 @@
     "run-migrations": "node run_migrations.js"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.3.0",
     "@marsidev/react-turnstile": "^1.6.0",
     "@supabase/supabase-js": "^2.45.0",
     "framer-motion": "^11.18.2",

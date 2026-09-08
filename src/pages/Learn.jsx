@@ -7,6 +7,7 @@ import SaveButton from '../components/SaveButton.jsx';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import useNotifyMe from '../hooks/useNotifyMe.js';
 import NotifyMeButton from '../components/NotifyMeButton.jsx';
+import { subscribeNotify } from '../utils/subscribeNotify.js';
 
 export default function Learn() {
     const navigate = useNavigate();
@@ -147,17 +148,17 @@ export default function Learn() {
                 showToast('Please log in to request a course.', 'error');
                 return;
             }
-            await supabase.from('notify_subscribers').insert({
-                user_id: user.id,
+            // Via the subscribe-notify Edge Function (JWT-attributed).
+            await subscribeNotify({
                 email: user.email,
-                feature_key: `course_request:${requestForm.topic}`
+                featureKey: `course_request:${requestForm.topic}`,
             });
             showToast('Course request submitted successfully!', 'success');
             setShowRequestModal(false);
             setRequestForm({ topic: '' });
         } catch (err) {
             console.error(err);
-            showToast('Failed to submit request.', 'error');
+            showToast(err.message || 'Failed to submit request.', 'error');
         } finally {
             setSubmittingRequest(false);
         }
@@ -168,17 +169,14 @@ export default function Learn() {
         if (!notifyEmail) return;
         setSubmittingNotify(true);
         try {
-            const userId = user ? user.id : 'anon';
-            await supabase.from('notify_subscribers').insert({
-                user_id: userId,
-                email: notifyEmail,
-                feature_key: 'resources_tab'
-            });
+            // Learn is behind AppShell (always authed) — the Edge Function
+            // ties the row to the caller's user_id via their JWT.
+            await subscribeNotify({ email: notifyEmail, featureKey: 'resources_tab' });
             showToast('You will be notified when Resources launch!', 'success');
             setNotifyEmail('');
         } catch (err) {
             console.error(err);
-            showToast('Failed to subscribe.', 'error');
+            showToast(err.message || 'Failed to subscribe.', 'error');
         } finally {
             setSubmittingNotify(false);
         }

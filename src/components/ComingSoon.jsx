@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { supabase } from '../supabaseClient.js';
+import { Turnstile } from '@marsidev/react-turnstile';
+import { subscribeNotify } from '../utils/subscribeNotify.js';
 import Navbar from './Navbar.jsx';
 import Footer from './Footer.jsx';
 import Toast, { useToast } from './Toast.jsx';
@@ -17,20 +18,24 @@ export default function ComingSoon({
     const { toast, showToast, hideToast } = useToast();
     const [email, setEmail] = useState('');
     const [status, setStatus] = useState('idle'); // idle, loading, success, error
+    const [captchaToken, setCaptchaToken] = useState('');
+    const turnstileRef = useRef(null);
 
     const handleNotify = async (e) => {
         e.preventDefault();
         if (!email) return;
+        if (!captchaToken) {
+            showToast('Please complete the verification challenge.', 'error');
+            return;
+        }
         setStatus('loading');
-        
+
         try {
-            const { error } = await supabase.from('notify_subscribers').insert([
-                { email, feature_key: featureKey }
-            ]);
-            
-            // Ignore unique violation if already subscribed
-            if (error && error.code !== '23505') throw error;
-            
+            // Routed through the subscribe-notify Edge Function (Turnstile-
+            // verified, service-role insert) — direct anon inserts into
+            // notify_subscribers are no longer allowed.
+            await subscribeNotify({ email, featureKey, turnstileToken: captchaToken });
+
             setStatus('success');
             setEmail('');
             showToast('You are on the list! We will notify you.', 'success');
@@ -38,8 +43,11 @@ export default function ComingSoon({
         } catch (err) {
             console.error('Subscription error:', err);
             setStatus('error');
-            showToast('Failed to subscribe. Please try again.', 'error');
+            showToast(err.message || 'Failed to subscribe. Please try again.', 'error');
             setTimeout(() => setStatus('idle'), 3000);
+        } finally {
+            turnstileRef.current?.reset();
+            setCaptchaToken('');
         }
     };
 
@@ -107,9 +115,19 @@ export default function ComingSoon({
                                 color: '#111827'
                             }}
                         />
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <Turnstile
+                                ref={turnstileRef}
+                                siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                                onSuccess={setCaptchaToken}
+                                onExpire={() => setCaptchaToken('')}
+                                onError={() => setCaptchaToken('')}
+                                options={{ size: 'flexible' }}
+                            />
+                        </div>
                         <button
                             type="submit"
-                            disabled={status === 'loading' || status === 'success'}
+                            disabled={status === 'loading' || status === 'success' || !captchaToken}
                             style={{
                                 padding: '1rem',
                                 borderRadius: '12px',

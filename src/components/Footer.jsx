@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Turnstile } from '@marsidev/react-turnstile';
 import { ChaveeLogo } from '../Logo.jsx';
+import { openCookieSettings } from '../utils/cookieConsent.js';
 
 const FOOTER_LINKS = {
     Platform: [
@@ -245,9 +246,11 @@ export default function Footer() {
                     <span style={{ color: '#9CA3AF' }}>© {year} Chavee</span>
                     <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
                         <Link to="/privacy-policy" style={{ color: '#6B7280', textDecoration: 'none' }} onMouseEnter={e => e.target.style.color = '#0B8F5A'} onMouseLeave={e => e.target.style.color = '#6B7280'}>Privacy Policy</Link>
+                        <Link to="/cookie-policy" style={{ color: '#6B7280', textDecoration: 'none' }} onMouseEnter={e => e.target.style.color = '#0B8F5A'} onMouseLeave={e => e.target.style.color = '#6B7280'}>Cookie Policy</Link>
                         <Link to="/terms-and-conditions" style={{ color: '#6B7280', textDecoration: 'none' }} onMouseEnter={e => e.target.style.color = '#0B8F5A'} onMouseLeave={e => e.target.style.color = '#6B7280'}>Terms</Link>
                         <Link to="/refund-and-cancellation" style={{ color: '#6B7280', textDecoration: 'none' }} onMouseEnter={e => e.target.style.color = '#0B8F5A'} onMouseLeave={e => e.target.style.color = '#6B7280'}>Refund Policy</Link>
                         <Link to="/shipping-and-delivery" style={{ color: '#6B7280', textDecoration: 'none' }} onMouseEnter={e => e.target.style.color = '#0B8F5A'} onMouseLeave={e => e.target.style.color = '#6B7280'}>Shipping Policy</Link>
+                        <button type="button" onClick={openCookieSettings} style={{ color: '#6B7280', background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer', textDecoration: 'none' }} onMouseEnter={e => e.target.style.color = '#0B8F5A'} onMouseLeave={e => e.target.style.color = '#6B7280'}>Cookie settings</button>
                     </div>
                 </div>
             </div>

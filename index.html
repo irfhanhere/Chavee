@@ -5,12 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
     <!-- ═══ PERFORMANCE — Preconnects & DNS prefetch ══════════════════ -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Google Fonts preconnects removed — Inter is now self-hosted
+         (@fontsource/inter, bundled). -->
     <link rel="preconnect" href="https://dtokistffdnycrzbmxcr.supabase.co" />
-    <link rel="dns-prefetch" href="//fonts.googleapis.com" />
     <link rel="dns-prefetch" href="//dtokistffdnycrzbmxcr.supabase.co" />
-    <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
 
     <!-- ═══ FAVICONS & PWA ════════════════════════════════════════════ -->
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png" />
@@ -76,8 +74,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Chavee" />
 
-    <!-- ═══ GOOGLE FONTS ══════════════════════════════════════════════ -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <!-- ═══ FONTS ═════════════════════════════════════════════════════ -->
+    <!-- Inter is self-hosted via @fontsource/inter, imported in
+         src/index.css and bundled by Vite. No external font request. -->
 
     <!-- ═══ CRITICAL CSS (above-the-fold) ════════════════════════════ -->
     <style>
@@ -193,8 +192,9 @@
       "areaServed": ["Kerala", "Tamil Nadu", "Karnataka", "Maharashtra", "Delhi", "India"]
     }
     </script>
-    <!-- ═══ CASHFREE DROPIN SDK ════════════════════════════════════════════ -->
-    <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+    <!-- Cashfree Drop-in SDK is loaded on demand only on pages that take
+         payment — see src/utils/loadCashfree.js (was a blocking <script>
+         here that loaded on every page). -->
   </head>
   <body>
     <div id="root"></div>

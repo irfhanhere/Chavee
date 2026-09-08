@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../supabaseClient.js';
 import DataTable from '../components/DataTable.jsx';
 import FormModal from '../components/FormModal.jsx';
@@ -45,6 +46,7 @@ function StatCard({ title, count, color, icon, loading }) {
 // ---- Main Manager Component ----
 
 export default function CommunitiesManager() {
+    const navigate = useNavigate();
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(true);
     
@@ -442,7 +444,7 @@ export default function CommunitiesManager() {
                     <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '1.5rem', boxShadow: 'var(--shadow-sm)' }}>
                         <h3 style={{ margin: '0 0 1rem', fontSize: '1rem', fontWeight: 800 }}>Quick Actions</h3>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                            <button onClick={() => setFormModal({ open: true, row: null })} style={{ width: '100%', padding: '0.75rem', borderRadius: 8, background: 'var(--peacock-green)', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                            <button onClick={() => navigate('/admin/communities/new')} style={{ width: '100%', padding: '0.75rem', borderRadius: 8, background: 'var(--peacock-green)', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                                 <span>+</span> Create Community
                             </button>
                         </div>
@@ -493,27 +495,27 @@ export default function CommunitiesManager() {
                 </div>
             </div>
 
-            {formModal.open && (
-                <FormModal
-                    title={formModal.row ? 'Edit Community' : 'Create Community'}
-                    fields={[
-                        { key: 'name', label: 'Name *', type: 'text', required: true },
-                        { key: 'description', label: 'Description', type: 'textarea' },
-                        { key: 'guidelines', label: 'Guidelines / Rules', type: 'textarea' },
-                        { key: 'category', label: 'Category', type: 'text' },
-                        { key: 'is_paid', label: 'Free or Paid', type: 'toggle', onLabel: 'Paid', offLabel: 'Free' },
-                        { key: 'price', label: 'Price (if paid)', type: 'number', condition: (v) => v.is_paid, required: true },
-                        { key: 'visibility', label: 'Visibility', type: 'select', options: [{value: 'Public', label: 'Public'}, {value: 'Private', label: 'Private'}, {value: 'Invite Only', label: 'Invite Only'}] },
-                        { key: 'emoji', label: 'Emoji (Icon)', type: 'emoji' },
-                        { key: 'logo_url', label: 'Logo URL', type: 'text' },
-                        { key: 'status', label: 'Status', type: 'select', options: [{value: 'Live', label: 'Live'}, {value: 'Coming Soon', label: 'Coming Soon'}] }
-                    ]}
-                    initialValues={formModal.row || { status: 'Coming Soon', visibility: 'Public', is_paid: false, price: 0, emoji: '🏘️' }}
-                    onSubmit={handleSave}
-                    onClose={() => setFormModal({ open: false, row: null })}
-                    loading={saving}
-                />
-            )}
+            {/* Edit modal — FormModal is edit-only here; create goes to /admin/communities/new */}
+            <FormModal
+                open={formModal.open}
+                title="Edit Community"
+                fields={[
+                    { key: 'name', label: 'Name *', type: 'text', required: true },
+                    { key: 'description', label: 'Description', type: 'textarea' },
+                    { key: 'guidelines', label: 'Guidelines / Rules', type: 'textarea' },
+                    { key: 'category', label: 'Category', type: 'text' },
+                    { key: 'is_paid', label: 'Free or Paid', type: 'toggle', onLabel: 'Paid', offLabel: 'Free' },
+                    { key: 'price', label: 'Price (if paid)', type: 'number', condition: (v) => v.is_paid, required: true },
+                    { key: 'visibility', label: 'Visibility', type: 'select', options: [{value: 'Public', label: 'Public'}, {value: 'Private', label: 'Private'}, {value: 'Invite Only', label: 'Invite Only'}] },
+                    { key: 'emoji', label: 'Emoji (Icon)', type: 'emoji' },
+                    { key: 'logo_url', label: 'Logo URL', type: 'text' },
+                    { key: 'status', label: 'Status', type: 'select', options: [{value: 'Live', label: 'Live'}, {value: 'Coming Soon', label: 'Coming Soon'}] }
+                ]}
+                initialValues={formModal.row || { status: 'Coming Soon', visibility: 'Public', is_paid: false, price: 0, emoji: '🏘️' }}
+                onSubmit={handleSave}
+                onClose={() => setFormModal({ open: false, row: null })}
+                loading={saving}
+            />
 
             {confirmDialog.open && (
                 <ConfirmDialog

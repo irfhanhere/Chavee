@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { Turnstile } from '@marsidev/react-turnstile';
 import Navbar from '../components/Navbar.jsx';
 import Footer from '../components/Footer.jsx';
 import Toast, { useToast } from '../components/Toast.jsx';
 import { supabase } from '../supabaseClient.js';
+import { subscribeNotify } from '../utils/subscribeNotify.js';
 import { ButtonSpinner } from '../components/Spinner.jsx';
 import SEO from '../components/SEO.jsx';
 
@@ -39,6 +41,8 @@ export default function Careers() {
     const [talentOpen, setTalentOpen] = useState(false);
     const [talentEmail, setTalentEmail] = useState('');
     const [talentSubmitting, setTalentSubmitting] = useState(false);
+    const [talentCaptcha, setTalentCaptcha] = useState('');
+    const talentTurnstileRef = useRef(null);
 
     const loadJobs = async () => {
         setLoadingJobs(true);
@@ -99,12 +103,19 @@ export default function Careers() {
 
     const handleTalentSubmit = async (e) => {
         e.preventDefault();
+        if (!talentCaptcha) {
+            showToast('Please complete the verification challenge.', 'error');
+            return;
+        }
         setTalentSubmitting(true);
         try {
-            const { error } = await supabase
-                .from('notify_subscribers')
-                .insert({ email: talentEmail.trim().toLowerCase(), feature_key: 'career_talent_network' });
-            if (error) throw error;
+            // Via the subscribe-notify Edge Function (Turnstile-verified,
+            // service-role insert) — no direct anon table write.
+            await subscribeNotify({
+                email: talentEmail,
+                featureKey: 'career_talent_network',
+                turnstileToken: talentCaptcha,
+            });
             showToast("You're on our talent network — we'll reach out when a matching role opens!", 'success');
             setTalentOpen(false);
             setTalentEmail('');
@@ -112,6 +123,8 @@ export default function Careers() {
             showToast(err.message || 'Could not join the talent network. Please try again.', 'error');
         } finally {
             setTalentSubmitting(false);
+            talentTurnstileRef.current?.reset();
+            setTalentCaptcha('');
         }
     };
 
@@ -269,9 +282,17 @@ export default function Careers() {
                         <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 1.25rem' }}>Leave your email and we'll reach out when a role that fits opens up.</p>
                         <form onSubmit={handleTalentSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                             <input type="email" required value={talentEmail} onChange={e => setTalentEmail(e.target.value)} placeholder="you@example.com" className="dark-input" style={{ width: '100%' }} />
+                            <Turnstile
+                                ref={talentTurnstileRef}
+                                siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                                onSuccess={setTalentCaptcha}
+                                onExpire={() => setTalentCaptcha('')}
+                                onError={() => setTalentCaptcha('')}
+                                options={{ size: 'flexible' }}
+                            />
                             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                                 <button type="button" onClick={() => setTalentOpen(false)} className="btn-ghost" style={{ padding: '0.55rem 1.25rem', borderRadius: 10 }}>Cancel</button>
-                                <button type="submit" disabled={talentSubmitting} className="btn-primary" style={{ padding: '0.55rem 1.5rem', borderRadius: 10 }}>
+                                <button type="submit" disabled={talentSubmitting || !talentCaptcha} className="btn-primary" style={{ padding: '0.55rem 1.5rem', borderRadius: 10 }}>
                                     {talentSubmitting ? <ButtonSpinner label="Joining..." /> : 'Join'}
                                 </button>
                             </div>

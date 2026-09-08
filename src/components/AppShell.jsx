@@ -110,6 +110,7 @@ const renderAvatar = (avatarData, name, size = 34, fontSize = '0.9rem') => {
 export default function AppShell({ children }) {
     const navigate  = useNavigate();
     const location  = useLocation();
+    const mainRef = useRef(null);
 
     const [user, setUser]               = useState(null);
     const [gamification, setGamification] = useState(null);
@@ -119,6 +120,7 @@ export default function AppShell({ children }) {
     const [isAdmin, setIsAdmin]         = useState(false);
     const [previewMode, setPreviewMode] = useState(false);
     const [showPreviewModal, setShowPreviewModal] = useState(false);
+    const [showScrollTop, setShowScrollTop] = useState(false);
     
     // Avatar Dropdown State
     const [showDropdown, setShowDropdown] = useState(false);
@@ -208,6 +210,17 @@ export default function AppShell({ children }) {
     // Close sidebar on route change (mobile)
     useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
+    // AppShell's main element is the scroll owner for authenticated pages.
+    useEffect(() => {
+        const main = mainRef.current;
+        if (!main) return undefined;
+
+        const updateScrollTopVisibility = () => setShowScrollTop(main.scrollTop > 400);
+        updateScrollTopVisibility();
+        main.addEventListener('scroll', updateScrollTopVisibility, { passive: true });
+        return () => main.removeEventListener('scroll', updateScrollTopVisibility);
+    }, [location.pathname, checking, previewMode]);
+
     // Clear preview mode if navigating to landing page
     useEffect(() => {
         if (location.pathname === '/') {
@@ -257,10 +270,23 @@ export default function AppShell({ children }) {
         return location.pathname === path;
     };
 
+    const handleBottomNavClick = (event, path) => {
+        if (path !== '/' || location.pathname !== '/dashboard') return;
+
+        event.preventDefault();
+        const main = mainRef.current;
+        if (!main) return;
+
+        const isNearTop = main.scrollTop <= 100;
+        main.scrollTo({ top: 0, behavior: 'smooth' });
+        window.dispatchEvent(new CustomEvent('dashboard-home-tap', { detail: { isNearTop } }));
+    };
+
     /* ── Styles ─────────────────────────────────────────────────── */
     const S = {
         layout: {
-            minHeight: '100vh',
+            height: '100vh',
+            overflow: 'hidden',
             background: 'var(--bg-base)',
             color: 'var(--text-primary)',
             display: 'flex',
@@ -619,7 +645,7 @@ export default function AppShell({ children }) {
                 )}
 
                 {/* Main content */}
-                <main style={S.main} className="app-main-content">
+                <main ref={mainRef} style={S.main} className="app-main-content">
                     {children}
                 </main>
             </div>
@@ -633,6 +659,7 @@ export default function AppShell({ children }) {
                     <Link
                         key={l.path}
                         to={l.path === '/' ? '/dashboard' : l.path}
+                        onClick={event => handleBottomNavClick(event, l.path)}
                         className={`mobile-bottom-nav-item${isBottomNavActive(l.path) ? ' active' : ''}`}
                     >
                         <span className="mobile-bottom-nav-icon">{l.icon}</span>
@@ -640,6 +667,46 @@ export default function AppShell({ children }) {
                     </Link>
                 ))}
             </nav>
+
+            <AnimatePresence>
+                {showScrollTop && (
+                    <motion.button
+                        key="scroll-to-top"
+                        type="button"
+                        initial={{ opacity: 0, scale: 0.7, y: 8 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.7, y: 8 }}
+                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                        onClick={() => mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+                        className="scroll-to-top-btn allow-preview"
+                        aria-label="Scroll to top"
+                        title="Scroll to top"
+                        style={{
+                            position: 'fixed',
+                            right: '1.25rem',
+                            zIndex: 180,
+                            width: 44,
+                            height: 44,
+                            borderRadius: '50%',
+                            border: '1.5px solid var(--border-mint)',
+                            background: 'var(--peacock-green)',
+                            color: '#fff',
+                            boxShadow: '0 4px 16px rgba(17,94,89,0.35)',
+                            cursor: 'pointer',
+                            fontSize: '1.15rem',
+                            fontWeight: 800,
+                            lineHeight: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.93 }}
+                    >
+                        ↑
+                    </motion.button>
+                )}
+            </AnimatePresence>
 
             {/* Preview Modal */}
             <AnimatePresence>
@@ -757,6 +824,13 @@ export default function AppShell({ children }) {
                    generous than the bar's typical ~60px to comfortably clear it. */
                 @media (max-width: 768px) {
                     .app-main-content { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+                }
+
+                /* Scroll-to-top button: above the bottom tab bar on mobile,
+                   near the viewport edge on desktop (no tab bar there). */
+                .scroll-to-top-btn { bottom: 5.5rem; }
+                @media (min-width: 769px) {
+                    .scroll-to-top-btn { bottom: 1.75rem; }
                 }
             `}</style>
         </div>

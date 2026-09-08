@@ -6,6 +6,7 @@ import Footer from '../components/Footer.jsx';
 import { supabase } from '../supabaseClient.js';
 import { ButtonSpinner } from '../components/Spinner.jsx';
 import SEO, { breadcrumbSchema } from '../components/SEO.jsx';
+import DataCollectionNotice from '../components/DataCollectionNotice.jsx';
 
 const QUERY_TYPES = [
     'General Inquiry',
@@ -211,6 +212,7 @@ export default function ContactUs() {
                                     <label style={S.label}>Your Message</label>
                                     <textarea required rows={4} value={message} onChange={e => setMessage(e.target.value)} style={{ ...S.input, resize: 'vertical' }} />
                                 </div>
+                                <DataCollectionNotice variant="contact" />
                                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
                                     <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{ marginTop: '0.2rem' }} />
                                     <span>

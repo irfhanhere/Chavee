@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../../../supabaseClient.js';
+import { subscribeNotify } from '../../../utils/subscribeNotify.js';
 import { ButtonSpinner } from '../../../components/Spinner.jsx';
 
 export default function SecurityTab({ user, showToast }) {
@@ -41,11 +42,11 @@ export default function SecurityTab({ user, showToast }) {
     const handleNotify2FA = async () => {
         setNotifying2FA(true);
         try {
-            const { error } = await supabase.from('notify_subscribers').insert({ email: user.email, feature_key: '2fa_security' });
-            if (error && error.code !== '23505') throw error;
+            // Via the subscribe-notify Edge Function (JWT-attributed).
+            await subscribeNotify({ email: user.email, featureKey: '2fa_security' });
             showToast("You're on the waitlist for 2FA!", 'success');
         } catch (err) {
-            showToast("Failed to join waitlist.", 'error');
+            showToast(err.message || "Failed to join waitlist.", 'error');
         } finally {
             setNotifying2FA(false);
         }

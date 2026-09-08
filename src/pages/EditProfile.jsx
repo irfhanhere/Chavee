@@ -44,23 +44,31 @@ export default function EditProfile() {
                 console.error("Error fetching profile:", error);
             }
 
-            setDraft(data || {
+            const initial = data || {
                 id: session.user.id,
                 full_name: '',
                 bio: '',
                 college: '',
                 course: '',
-                year: '',
-                skills: '',
-                interests: '',
+                graduation_year: '',
+                skills: [],
+                interests: [],
                 linkedin_url: '',
                 portfolio_url: '',
-                resume_url: '',
+                resume_link: '',
                 avatar_url: '',
                 banner_url: '',
                 profile_visibility: 'public',
                 hide_email: true,
                 hide_phone: true
+            };
+
+            // profiles.skills and profiles.interests are real text[] columns —
+            // flatten to comma-separated strings for the text inputs in this form.
+            setDraft({
+                ...initial,
+                skills: Array.isArray(initial.skills) ? initial.skills.join(', ') : (initial.skills || ''),
+                interests: Array.isArray(initial.interests) ? initial.interests.join(', ') : (initial.interests || '')
             });
             setLoading(false);
         };
@@ -74,8 +82,11 @@ export default function EditProfile() {
     const handleSave = async () => {
         setSaving(true);
         try {
+            const toArray = (v) => (v || '').split(',').map(s => s.trim()).filter(Boolean);
             const updates = {
                 ...draft,
+                skills: toArray(draft.skills),
+                interests: toArray(draft.interests),
                 updated_at: new Date()
             };
             const { error } = await supabase.from('profiles').upsert(updates);
@@ -131,7 +142,7 @@ export default function EditProfile() {
                     </div>
                     <div style={S.group}>
                         <label style={S.label}>Graduation Year</label>
-                        <input style={S.input} value={draft.year || ''} onChange={e => handleChange('year', e.target.value)} placeholder="e.g. 2026" />
+                        <input style={S.input} value={draft.graduation_year || ''} onChange={e => handleChange('graduation_year', e.target.value)} placeholder="e.g. 2026" />
                     </div>
                 </div>
             );
@@ -171,7 +182,7 @@ export default function EditProfile() {
                     </div>
                     <div style={S.group}>
                         <label style={S.label}>Resume URL (PDF Link)</label>
-                        <input style={S.input} value={draft.resume_url || ''} onChange={e => handleChange('resume_url', e.target.value)} placeholder="https://drive.google.com/..." />
+                        <input style={S.input} value={draft.resume_link || ''} onChange={e => handleChange('resume_link', e.target.value)} placeholder="https://drive.google.com/..." />
                     </div>
                 </div>
             );
@@ -327,7 +338,7 @@ function PreviewCard({ draft }) {
                             {draft.full_name || 'Your Name'}
                         </h2>
                         <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                            {draft.college || 'College not set'} {draft.course ? `• ${draft.course}` : ''} {draft.year ? `• Class of ${draft.year}` : ''}
+                            {draft.college || 'College not set'} {draft.course ? `• ${draft.course}` : ''} {draft.graduation_year ? `• Class of ${draft.graduation_year}` : ''}
                         </p>
                     </div>
                 </div>
@@ -349,8 +360,8 @@ function PreviewCard({ draft }) {
                             Portfolio
                         </a>
                     )}
-                    {draft.resume_url && (
-                        <a href={draft.resume_url} target="_blank" rel="noreferrer" style={{ padding: '0.5rem 1rem', background: 'var(--bg-mint)', color: 'var(--peacock-green)', border: '1px solid var(--border-mint)', borderRadius: 8, textDecoration: 'none', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    {draft.resume_link && (
+                        <a href={draft.resume_link} target="_blank" rel="noreferrer" style={{ padding: '0.5rem 1rem', background: 'var(--bg-mint)', color: 'var(--peacock-green)', border: '1px solid var(--border-mint)', borderRadius: 8, textDecoration: 'none', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                             Resume
                         </a>
                     )}

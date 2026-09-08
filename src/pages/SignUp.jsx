@@ -15,6 +15,7 @@ import { InputField } from '../components/auth/InputField.jsx';
 import { PasswordField } from '../components/auth/PasswordField.jsx';
 import { SocialLoginButton } from '../components/auth/SocialLoginButton.jsx';
 import { AuthFooter } from '../components/auth/AuthFooter.jsx';
+import DataCollectionNotice from '../components/DataCollectionNotice.jsx';
 
 /* Determine the correct redirect URL (prod vs local dev) */
 const getRedirectUrl = () => {
@@ -455,11 +456,13 @@ export default function SignUp() {
                         )}
                     </div>
 
+                    <DataCollectionNotice variant="signup" style={{ marginTop: '0.5rem' }} />
+
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem' }}>
-                        <input 
-                            type="checkbox" 
-                            id="agreeTerms" 
-                            checked={agreeTerms} 
+                        <input
+                            type="checkbox"
+                            id="agreeTerms"
+                            checked={agreeTerms}
                             onChange={(e) => setAgreeTerms(e.target.checked)}
                             style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#0B8F5A' }} 
                         />

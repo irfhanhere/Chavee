@@ -6,7 +6,15 @@ const CASHFREE_APP_ID = Deno.env.get('CASHFREE_APP_ID')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const CF_SERVICE_ROLE_KEY = Deno.env.get('CF_SERVICE_ROLE_KEY')!
 
-const CASHFREE_BASE_URL = 'https://sandbox.cashfree.com/pg'
+// Base host is chosen by the CASHFREE_ENV secret:
+//   npx supabase secrets set CASHFREE_ENV=production   (or: sandbox)
+// Unset -> sandbox. The CASHFREE_SECRET_KEY / CASHFREE_APP_ID pair MUST
+// belong to the same environment. Re-check the production host against
+// current Cashfree PG docs before the production cutover.
+const CASHFREE_ENV = (Deno.env.get('CASHFREE_ENV') ?? 'sandbox').toLowerCase()
+const CASHFREE_BASE_URL = CASHFREE_ENV === 'production'
+  ? 'https://api.cashfree.com/pg'
+  : 'https://sandbox.cashfree.com/pg'
 const PLATFORM_FEE_BUYER_PERCENT = 0.05  // 5% added to buyer
 const PLATFORM_FEE_SELLER_PERCENT = 0.02 // 2% deducted from seller
 
@@ -227,6 +235,10 @@ Deno.serve(async (req) => {
         total_platform_fee: amounts.total_platform_fee,
       },
       contract_id: contractId,
+      // The env this order was created against. Messages.jsx threads this
+      // into the Cashfree Dropin SDK `mode` so the widget can never drift
+      // from the backend's CASHFREE_ENV.
+      environment: CASHFREE_ENV === 'production' ? 'production' : 'sandbox',
     }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

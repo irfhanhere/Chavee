@@ -563,7 +563,9 @@ function DiscussionsTab({ community, user, role, showToast }) {
     React.useEffect(() => {
         const fetchAdmins = async () => {
             try {
-                const { data, error } = await supabase.from('admins').select('user_id');
+                // admin_ids(): SECURITY DEFINER helper (user_id only) — the
+                // admins table itself is now admin-only.
+                const { data, error } = await supabase.rpc('admin_ids');
                 if (error) throw error;
                 if (data) setAdminIds(new Set(data.map(a => a.user_id)));
             } catch (err) {

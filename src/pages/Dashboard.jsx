@@ -7,6 +7,7 @@ import { getLevelDetails, TIER_CONFIG } from '../hooks/useProfile.js';
 import { logUserActivity } from '../utils/activityLogger.js';
 import SaveButton from '../components/SaveButton.jsx';
 import NotifyMeButton from '../components/NotifyMeButton.jsx';
+import { subscribeNotify } from '../utils/subscribeNotify.js';
 import { useIsMobile } from '../hooks/useIsMobile.js';
 
 /* ── No hardcoded seed data — everything comes from Supabase ── */
@@ -451,29 +452,21 @@ export default function Dashboard() {
         if (!user || submittingFeatures[featureKey]) return;
         setSubmittingFeatures(prev => ({ ...prev, [featureKey]: true }));
         try {
-            const { data: existing } = await supabase
-                .from('notify_subscribers')
-                .select('id')
-                .eq('user_id', user.id)
-                .eq('feature_key', featureKey)
-                .single();
-
-            if (existing) {
-                showToast("You're already on the list!", 'info');
-                return;
-            }
-
-            const { error } = await supabase.from('notify_subscribers').insert({
-                user_id: user.id,
-                email: user.email || (profile?.email) || '',
-                feature_key: featureKey
+            // Via the subscribe-notify Edge Function; user_id is derived
+            // from the caller's JWT server-side, and dedup is handled there.
+            const res = await subscribeNotify({
+                email: user.email || profile?.email || '',
+                featureKey,
             });
-
-            if (error) throw error;
-            showToast("You're on the list! We'll email you when this launches.", 'success');
+            showToast(
+                res.alreadySubscribed
+                    ? "You're already on the list!"
+                    : "You're on the list! We'll email you when this launches.",
+                res.alreadySubscribed ? 'info' : 'success'
+            );
         } catch (err) {
             console.error(err);
-            showToast("Failed to subscribe.", 'error');
+            showToast(err.message || "Failed to subscribe.", 'error');
         } finally {
             setSubmittingFeatures(prev => ({ ...prev, [featureKey]: false }));
         }
@@ -572,6 +565,24 @@ export default function Dashboard() {
         fetchUpcomingEvents();
         fetchRecommendedJobs();
     }, [user]);
+
+    useEffect(() => {
+        const handleHomeTap = (event) => {
+            if (activeTab !== 'home') {
+                setActiveTab('home');
+                return;
+            }
+            // AppShell already called mainRef.scrollTo({ top: 0 }) before firing this event.
+            // If already near the top: refetch immediately (user wants a pull-to-refresh).
+            // If scrolled down: wait ~350 ms for the smooth scroll to land before fetching
+            // so the feed doesn't flash stale content mid-animation.
+            const delay = event.detail?.isNearTop ? 0 : 350;
+            setTimeout(() => fetchDbPosts(), delay);
+        };
+
+        window.addEventListener('dashboard-home-tap', handleHomeTap);
+        return () => window.removeEventListener('dashboard-home-tap', handleHomeTap);
+    }, [activeTab, user]);
 
     // ── Onboarding popup trigger ─────────────────────────────────
     useEffect(() => {
@@ -699,7 +710,9 @@ export default function Dashboard() {
 
     const fetchAdmins = async () => {
         try {
-            const { data, error } = await supabase.from('admins').select('user_id');
+            // admin_ids() is a SECURITY DEFINER helper that exposes only the
+            // user_id column — the admins table itself is now admin-only.
+            const { data, error } = await supabase.rpc('admin_ids');
             if (error) throw error;
             if (data) {
                 setAdminIds(new Set(data.map(a => a.user_id)));
@@ -1211,20 +1224,9 @@ export default function Dashboard() {
                 await logUserActivity(user.id, 'post_like', { post_id: postId });
 
                 // Notify the post owner (skip if liker is the owner)
-                const postOwnerId = post.user_id || post.author_id;
-                if (postOwnerId && postOwnerId !== user.id) {
-                    try {
-                        await supabase.rpc('create_notification', {
-                            p_user_id: postOwnerId,
-                            p_type: 'post_like',
-                            p_title: '❤️ Someone liked your post!',
-                            p_body: 'Your post got a new like on Chavee.',
-                            p_link: '/dashboard'
-                        });
-                    } catch (nErr) {
-                        console.error('Like notification error:', nErr);
-                    }
-                }
+                // The post-owner "like" notification is produced server-side
+                // by the handle_new_like trigger on post_likes INSERT —
+                // no client-side create_notification call needed here.
             } else {
                 const { error } = await supabase
                     .from('post_likes')
@@ -1295,22 +1297,8 @@ export default function Dashboard() {
             showToast('💬 Comment added! +5 XP earned.', 'success');
             rewardPoints(5);
 
-            // Notify the post owner (skip if commenter is the owner)
-            const commentedPost = posts.find(p => p.id === postId);
-            const postOwnerId = commentedPost?.user_id || commentedPost?.author_id;
-            if (postOwnerId && postOwnerId !== user.id) {
-                try {
-                    await supabase.rpc('create_notification', {
-                        p_user_id: postOwnerId,
-                        p_type: 'post_comment',
-                        p_title: '💬 New comment on your post!',
-                        p_body: (text.trim()).slice(0, 60),
-                        p_link: '/dashboard'
-                    });
-                } catch (nErr) {
-                    console.error('Comment notification error:', nErr);
-                }
-            }
+            // The post-owner "comment" notification is produced server-side
+            // by the handle_new_comment trigger on post_comments INSERT.
         } catch (err) {
             console.error('Error adding comment:', err);
             showToast('Failed to add comment: ' + err.message, 'error');

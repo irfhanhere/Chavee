@@ -7,7 +7,11 @@ export default function AccountTab({ user, profile, setProfile, showToast }) {
     const [uploadingPicture, setUploadingPicture] = useState(false);
     const [uploadingBanner, setUploadingBanner] = useState(false);
 
-    // Editable state for form fields
+    // Editable state for form fields.
+    // NOTE: Only include columns that actually exist in the profiles table.
+    // Sending unknown columns in a Supabase .update() causes PostgREST to
+    // reject the ENTIRE request with a 400 error, silently failing all fields.
+    // 'privacy' is NOT managed here — it lives in PrivacyTab via privacy_settings.
     const [formData, setFormData] = useState({
         full_name: profile?.full_name || '',
         username: profile?.username || '',
@@ -17,8 +21,23 @@ export default function AccountTab({ user, profile, setProfile, showToast }) {
         course: profile?.course || '',
         year_of_study: profile?.year_of_study || '',
         bio: profile?.bio || '',
-        privacy: profile?.privacy || 'public'
     });
+
+    // Sync formData whenever profile prop loads or updates from Supabase
+    React.useEffect(() => {
+        if (profile) {
+            setFormData({
+                full_name: profile.full_name || '',
+                username: profile.username || '',
+                phone: profile.phone || '',
+                date_of_birth: profile.date_of_birth || '',
+                college: profile.college || '',
+                course: profile.course || '',
+                year_of_study: profile.year_of_study || '',
+                bio: profile.bio || '',
+            });
+        }
+    }, [profile]);
 
     const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -83,16 +102,31 @@ export default function AccountTab({ user, profile, setProfile, showToast }) {
     const handleSave = async () => {
         setSaving(true);
         try {
+            // Build an explicit whitelist of real profiles columns.
+            // Do NOT spread formData directly — any ghost key causes PostgREST
+            // to reject the entire PATCH with a 400, silently failing every field.
+            const payload = {
+                full_name:      formData.full_name,
+                username:       formData.username,
+                phone:          formData.phone,
+                // date_of_birth is a `date` column — Postgres rejects '' as invalid,
+                // which would fail the whole update. Send null when empty.
+                date_of_birth:  formData.date_of_birth || null,
+                college:        formData.college,
+                course:         formData.course,
+                year_of_study:  formData.year_of_study,
+                bio:            formData.bio,
+            };
             const { error } = await supabase
                 .from('profiles')
-                .update(formData)
+                .update(payload)
                 .eq('id', user.id);
             
             if (error) throw error;
-            setProfile(prev => ({ ...prev, ...formData }));
+            setProfile(prev => ({ ...prev, ...payload }));
             showToast('Profile updated successfully!', 'success');
         } catch (error) {
-            console.error(error);
+            console.error('Profile save failed:', error);
             showToast(error.message, 'error');
         } finally {
             setSaving(false);
@@ -109,8 +143,8 @@ export default function AccountTab({ user, profile, setProfile, showToast }) {
                         <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 800 }}>Profile Information</h2>
                         <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Update your personal details and public profile information.</p>
                     </div>
-                    <button onClick={handleSave} disabled={saving} style={{ background: 'transparent', border: '1px solid var(--peacock-green)', color: 'var(--peacock-green)', padding: '0.6rem 1.25rem', borderRadius: 8, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        {saving ? <ButtonSpinner label="Saving..." /> : <><span>✏️</span> Edit Profile</>}
+                    <button onClick={handleSave} disabled={saving} style={{ background: 'var(--peacock-green)', border: 'none', color: '#fff', padding: '0.65rem 1.4rem', borderRadius: 10, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', boxShadow: '0 2px 8px rgba(17,94,89,0.25)', transition: 'all 0.2s', opacity: saving ? 0.8 : 1 }}>
+                        {saving ? <ButtonSpinner label="Saving..." /> : <><span>💾</span> Save Changes</>}
                     </button>
                 </div>
 
@@ -165,13 +199,18 @@ export default function AccountTab({ user, profile, setProfile, showToast }) {
 
                 </div>
 
-                <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <span>📅</span> Joined on {new Date(profile?.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span>📅</span> Joined on {new Date(profile?.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span>🌐</span> Profile Visibility: <span style={{ fontWeight: 600, color: 'var(--text-primary)', textTransform: 'capitalize' }}>{profile?.profile_visibility || profile?.privacy || 'public'}</span>
+                        </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <span>🌐</span> Profile Visibility: <span style={{ fontWeight: 600, color: 'var(--text-primary)', textTransform: 'capitalize' }}>{formData.privacy}</span>
-                    </div>
+                    <button onClick={handleSave} disabled={saving} style={{ background: 'var(--peacock-green)', border: 'none', color: '#fff', padding: '0.65rem 1.5rem', borderRadius: 10, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', boxShadow: '0 2px 8px rgba(17,94,89,0.25)', transition: 'all 0.2s', opacity: saving ? 0.8 : 1 }}>
+                        {saving ? <ButtonSpinner label="Saving..." /> : <><span>💾</span> Save Changes</>}
+                    </button>
                 </div>
             </div>
 

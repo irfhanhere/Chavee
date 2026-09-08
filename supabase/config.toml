@@ -1,4 +1,10 @@
 
+# Public form endpoint — anonymous callers are allowed through and the
+# function does its own Turnstile check (see index.ts). Deploy with:
+#   npx supabase functions deploy subscribe-notify --no-verify-jwt
+[functions.subscribe-notify]
+verify_jwt = false
+
 [functions.cashfree-webhook]
 enabled = true
 verify_jwt = false

@@ -13,12 +13,12 @@ import { useLandingStats } from '../hooks/useLandingStats.js';
 const FOUNDERS = [
     {
         name: 'Akshay Ennazhiyil',
-        role: 'Founder & CEO',
-        bio: 'Sales expert and education consultant with a passion for helping students discover the right path and opportunities.',
+        role: 'Co-founder & CEO',
+        bio: 'Leads strategy, growth, and business development at Chavee Technologies, with a background in sales, business strategy, and business writing. Focused on building partnerships, driving market growth, and turning ideas into scalable opportunities.',
         initials: 'AE',
         color: 'linear-gradient(135deg, #115E59 0%, #059669 100%)',
         photo: '/assets/founders/akshay.jpg',
-        alt: 'Akshay Ennazhiyil, Founder & CEO of Chavee',
+        alt: 'Akshay Ennazhiyil, Co-founder & CEO of Chavee',
         links: [
             { label: 'LinkedIn', icon: 'in', url: 'https://www.linkedin.com/in/akshay-ennazhiyil-85213a241/' },
             { label: 'Instagram', icon: '📷', url: 'https://www.instagram.com/mr_akshay.e/' },
@@ -26,14 +26,14 @@ const FOUNDERS = [
     },
     {
         name: 'Irfhan',
-        role: 'Co-founder & COO',
+        role: 'Co-founder & CCO',
         bio: 'Freelance brand developer, digital marketer and travel consultant. Building brands, experiences and platforms that make impact.',
         initials: 'IR',
         color: 'linear-gradient(135deg, #1E293B 0%, #0F172A 100%)',
         photo: '/assets/founders/irfhan.jpg',
         // Includes his real handle (IRFHANHERE — already linked via Instagram/
         // website below) so image search on that name surfaces this photo.
-        alt: 'Irfhan (IRFHANHERE), Co-founder & COO of Chavee',
+        alt: 'Irfhan (IRFHANHERE), Co-founder & CCO of Chavee',
         links: [
             { label: 'LinkedIn', icon: 'in', url: 'https://www.linkedin.com/in/irfhan-ap/' },
             { label: 'Instagram', icon: '📷', url: 'https://www.instagram.com/IRFHANHERE/' },

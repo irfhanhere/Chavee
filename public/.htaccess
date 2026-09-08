@@ -8,6 +8,15 @@ RewriteEngine On
 # If on Hostinger subdirectory, uncomment and set:
 # RewriteBase /
 
+# ── Canonical host: www.chavee.in → chavee.in ────────────────
+# MUST run before the SPA rewrite below — that rule's [L] would
+# otherwise stop this from ever executing. The Supabase auth
+# session lives in localStorage, which is per-origin, so the app
+# must be served from exactly one host or a session created on
+# www is invisible on the apex (and the user looks logged out).
+RewriteCond %{HTTP_HOST} ^www\.chavee\.in$ [NC]
+RewriteRule ^(.*)$ https://chavee.in/$1 [L,R=301]
+
 # Serve a real prerendered static file for a route, if one exists
 # (e.g. /about-us -> about-us.html), before falling back to the SPA.
 RewriteCond %{REQUEST_FILENAME}.html -f
@@ -71,7 +80,5 @@ RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
     AddOutputFilterByType DEFLATE image/svg+xml font/woff2
 </IfModule>
 
-# ── Remove www redirect (optional — redirect www → non-www) ──
-# Uncomment if you want www.chavee.in → chavee.in redirect:
-# RewriteCond %{HTTP_HOST} ^www\.chavee\.in [NC]
-# RewriteRule ^(.*)$ https://chavee.in/$1 [L,R=301]
+# ── www → apex redirect is now enabled at the TOP of this file
+#    (it must precede the SPA rewrite to take effect).

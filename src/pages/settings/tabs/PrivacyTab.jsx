@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../supabaseClient.js';
+import { subscribeNotify } from '../../../utils/subscribeNotify.js';
 import { PageLoader, ButtonSpinner } from '../../../components/Spinner.jsx';
 
 export default function PrivacyTab({ user, showToast }) {
@@ -72,11 +73,11 @@ export default function PrivacyTab({ user, showToast }) {
     const handleExport = async () => {
         setExporting(true);
         try {
-            const { error } = await supabase.from('notify_subscribers').insert({ email: user.email, feature_key: 'data_export' });
-            if (error && error.code !== '23505') throw error;
+            // Via the subscribe-notify Edge Function (JWT-attributed).
+            await subscribeNotify({ email: user.email, featureKey: 'data_export' });
             showToast("Data export isn't built yet — you're on the list to be notified when it is.", 'success');
         } catch (err) {
-            showToast('Failed to join waitlist.', 'error');
+            showToast(err.message || 'Failed to join waitlist.', 'error');
         } finally {
             setExporting(false);
         }

@@ -20,6 +20,7 @@ import CareerJobDetail from './pages/CareerJobDetail.jsx';
 import PressKit   from './pages/PressKit.jsx';
 import AboutUs    from './pages/AboutUs.jsx';
 import PrivacyPolicy from './pages/PrivacyPolicy.jsx';
+import CookiePolicy from './pages/CookiePolicy.jsx';
 import TermsAndConditions from './pages/TermsAndConditions.jsx';
 import RefundAndCancellation from './pages/RefundAndCancellation.jsx';
 import ShippingAndDelivery from './pages/ShippingAndDelivery.jsx';
@@ -28,9 +29,6 @@ import FAQ from './pages/FAQ.jsx';
 import CommunityGuidelines from './pages/CommunityGuidelines.jsx';
 import StudentPerks from './pages/StudentPerks.jsx';
 import ComingSoon from './components/ComingSoon.jsx';
-// Imported but never rendered by any route (dead import, pre-existing,
-// unrelated to this change) — left as a plain import, not touched.
-import EditProfile from './pages/EditProfile.jsx';
 
 // ── Authenticated app (AppShell-gated) — lazy ────────────────────────
 const AppShell   = lazy(() => import('./components/AppShell.jsx'));
@@ -171,6 +169,7 @@ export default function App() {
                 <Route path="/press"   element={<PressKit />} />
                 <Route path="/about-us"  element={<AboutUs />} />
                 <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+                <Route path="/cookie-policy" element={<CookiePolicy />} />
                 <Route path="/terms-and-conditions" element={<TermsAndConditions />} />
                 <Route path="/refund-and-cancellation" element={<RefundAndCancellation />} />
                 <Route path="/shipping-and-delivery" element={<ShippingAndDelivery />} />
@@ -235,6 +234,8 @@ export default function App() {
                 {/* ── Redirect legacy routes ── */}
                 <Route path="/about"    element={<Navigate to="/about-us" replace />} />
                 <Route path="/privacy"  element={<Navigate to="/privacy-policy" replace />} />
+                <Route path="/cookies"  element={<Navigate to="/cookie-policy" replace />} />
+                <Route path="/cookie-preferences" element={<Navigate to="/cookie-policy" replace />} />
                 <Route path="/terms"    element={<Navigate to="/terms-and-conditions" replace />} />
                 <Route path="/refund"   element={<Navigate to="/refund-and-cancellation" replace />} />
                 <Route path="/home"     element={<Navigate to="/" replace />} />

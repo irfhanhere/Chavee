@@ -5,7 +5,6 @@ plugins {
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
-  alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
 }
 
@@ -59,12 +58,12 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
-// Configure the Secrets Gradle Plugin to use .env and .env.example files
-// to match the convention used in Web projects.
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
-}
+// The Secrets Gradle Plugin was removed: the native app reads no
+// BuildConfig secret (no MAPS_API_KEY / Gemini key / etc. — Firebase AI
+// Logic gets its key from google-services.json), and the plugin was
+// pointed at the web project's .env, which must never be a build input.
+// If a build-time secret is ever needed, re-add the plugin pointing at a
+// dedicated, git-ignored app/secrets.properties — never at .env.
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
 

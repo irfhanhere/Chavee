@@ -163,15 +163,10 @@ export default function GigModerationQueue() {
                 }
             }
 
-            const { error: notifErr } = await supabase.from('notifications').insert({
-                user_id: gig.posted_by,
-                type: 'gig_approved',
-                title: '💼 Gig Listing Approved!',
-                body: `Your gig "${gig.title}" has been reviewed and approved. It is now visible on the marketplace.` + ((trust || autoTrusted) ? ' Future gigs you post will go live immediately, without review.' : ''),
-                link: '/earn',
-                is_read: false,
-            });
-            if (notifErr) console.error('Failed to write approval notification:', notifErr);
+            // The poster's "gig approved" notification is produced
+            // server-side by the handle_gig_verified trigger (fires on
+            // verified false -> true, which admin_moderate_gig('verify')
+            // does above).
 
             if (trust) showToast(`✅ Approved — ${gig.poster?.full_name || 'poster'} is now trusted`);
             else if (autoTrusted) showToast(`✅ Gig approved and live — ${gig.poster?.full_name || 'poster'} auto-trusted after 3 clean approvals!`);
@@ -204,15 +199,9 @@ export default function GigModerationQueue() {
                 .eq('id', gig.id);
             if (error) throw error;
 
-            const { error: notifErr } = await supabase.from('notifications').insert({
-                user_id: gig.posted_by,
-                type: 'gig_rejected',
-                title: '⚠️ Gig Listing Needs Changes',
-                body: `Your gig "${gig.title}" wasn't approved this time. Open it from My Gigs → Needs Attention to see why and resubmit.`,
-                link: '/earn',
-                is_read: false,
-            });
-            if (notifErr) console.error('Failed to write rejection notification:', notifErr);
+            // The poster's "gig rejected" notification is produced
+            // server-side by the handle_gig_rejected trigger (fires on
+            // status -> 'rejected', set just above).
 
             showToast('🚫 Gig rejected');
             setRows(prev => prev.filter(r => r.id !== gig.id));

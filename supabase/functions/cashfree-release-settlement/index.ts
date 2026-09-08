@@ -9,7 +9,15 @@ const CF_SERVICE_ROLE_KEY = Deno.env.get('CF_SERVICE_ROLE_KEY')!
 // Cashfree's vendor-level settlement-eligibility API lives on a DIFFERENT base URL
 // (api/v2) than the PG order/vendor APIs used elsewhere (sandbox.cashfree.com/pg) —
 // confirmed via https://www.cashfree.com/docs/payments/split/settlements/delay/vendor-level
-const CASHFREE_V2_BASE_URL = 'https://test.cashfree.com/api/v2'
+// Base host is chosen by the CASHFREE_ENV secret:
+//   npx supabase secrets set CASHFREE_ENV=production   (or: sandbox)
+// Unset -> test. Must match the CASHFREE_SECRET_KEY / CASHFREE_APP_ID
+// environment. Re-check the production host against current Cashfree
+// payout/settlement (api/v2) docs before the production cutover.
+const CASHFREE_ENV = (Deno.env.get('CASHFREE_ENV') ?? 'sandbox').toLowerCase()
+const CASHFREE_V2_BASE_URL = CASHFREE_ENV === 'production'
+  ? 'https://api.cashfree.com/api/v2'
+  : 'https://test.cashfree.com/api/v2'
 
 const EARLY_RELEASE_THRESHOLD = 2000 // ₹ — matches the mock rule already shown on the Earnings page
 

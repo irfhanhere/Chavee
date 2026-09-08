@@ -12,6 +12,7 @@ import RightSidebar from '../components/messages/RightSidebar.jsx';
 import { ConversationListSkeleton, ChatWindowSkeleton } from '../components/messages/SkeletonLoaders.jsx';
 import DeliveryFiles from '../components/messages/DeliveryFiles.jsx';
 import { sanitizeFilenameForStorageKey } from '../utils/attachmentStorage.js';
+import { loadCashfree } from '../utils/loadCashfree.js';
 
 export default function Messages() {
     const navigate = useNavigate();
@@ -852,31 +853,40 @@ export default function Messages() {
     // effect has nothing left to do (Dropin's job is done; the webhook takes over).
     useEffect(() => {
         if (!paymentModal || paymentModal.phase !== 'checkout') return;
-        if (!window.Cashfree) {
-            showToast('Payment SDK failed to load. Please refresh and try again.', 'error');
+
+        let cancelled = false;
+        // The Cashfree Drop-in SDK is loaded on demand here (it used to be a
+        // blocking <script> in index.html on every page).
+        loadCashfree().then((Cashfree) => {
+            if (cancelled) return;
+            // Mode must match whatever CASHFREE_ENV the order was actually created under on
+            // the backend (threaded through via paymentModal.environment) — never hardcoded
+            // here, or the Dropin SDK can silently point at the wrong Cashfree environment.
+            const cashfree = Cashfree({ mode: paymentModal.environment === 'production' ? 'production' : 'sandbox' });
+            cashfree.checkout({
+                paymentSessionId: paymentModal.paymentSessionId,
+                redirectTarget: '_modal',
+            }).then((result) => {
+                if (cancelled) return;
+                if (result.error) {
+                    // A real failure signal from the gateway itself (e.g. card declined) —
+                    // fine to trust directly, this isn't the "browser claims success" case.
+                    showToast(result.error.message || 'Payment failed', 'error');
+                    setPaymentModal(null);
+                } else if (result.paymentDetails) {
+                    // Dropin says the checkout step finished, but this is NOT payment
+                    // confirmation — only cashfree-webhook writing payment_status='paid'
+                    // is authoritative. Switch to a pending state and wait for that.
+                    setPaymentModal(m => m && { ...m, phase: 'confirming' });
+                }
+            });
+        }).catch(() => {
+            if (cancelled) return;
+            showToast('Payment SDK failed to load. Please check your connection and try again.', 'error');
             setPaymentModal(null);
-            return;
-        }
-        // Mode must match whatever CASHFREE_ENV the order was actually created under on the
-        // backend (threaded through via paymentModal.environment) — never hardcoded here, or
-        // the Dropin SDK can silently point at the wrong Cashfree environment.
-        const cashfree = window.Cashfree({ mode: paymentModal.environment === 'production' ? 'production' : 'sandbox' });
-        cashfree.checkout({
-            paymentSessionId: paymentModal.paymentSessionId,
-            redirectTarget: '_modal',
-        }).then((result) => {
-            if (result.error) {
-                // A real failure signal from the gateway itself (e.g. card declined) —
-                // fine to trust directly, this isn't the "browser claims success" case.
-                showToast(result.error.message || 'Payment failed', 'error');
-                setPaymentModal(null);
-            } else if (result.paymentDetails) {
-                // Dropin says the checkout step finished, but this is NOT payment
-                // confirmation — only cashfree-webhook writing payment_status='paid'
-                // is authoritative. Switch to a pending state and wait for that.
-                setPaymentModal(m => m && { ...m, phase: 'confirming' });
-            }
         });
+
+        return () => { cancelled = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [paymentModal?.orderId, paymentModal?.phase]);
 
@@ -1057,20 +1067,11 @@ export default function Messages() {
                 }).sort((a, b) => b.updatedAt - a.updatedAt);
             });
 
-            // Notify peer with explicit sender name
-            const activeConv = conversationsRef.current.find(c => c.id === activeId);
-            if (activeConv?.peerId) {
-                const senderName = currentUserProfile?.full_name || currentUserProfile?.username || 'Someone';
-                const previewText = (text.trim() || attachment?.name || 'an attachment').slice(0, 60);
-                
-                supabase.rpc('create_notification', {
-                    p_user_id: activeConv.peerId,
-                    p_type: 'new_message',
-                    p_title: `💬 New Message from ${senderName}`,
-                    p_body: `${senderName} sent you a message: "${previewText}"`,
-                    p_link: `/messages?id=${activeId}`
-                }).then(()=>{});
-            }
+            // The peer's "new message" notification is produced server-side
+            // by the handle_new_message trigger on messages INSERT (which
+            // now also skips community-channel conversations). No client
+            // create_notification call — it duplicated the trigger with a
+            // mismatched 'new_message' type string.
         } catch (err) {
             console.error('handleSend error:', err);
             // send_message raises real exceptions for the gate it enforces (locked
